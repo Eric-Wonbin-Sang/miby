@@ -1,0 +1,6 @@
+binwalk==2.1.0
+cffi==2.0.0
+cryptography==44.0.3
+lzallright==0.2.6
+pycparser==2.23
+ubi-reader==0.8.12
