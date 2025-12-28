@@ -1,5 +1,8 @@
 
 
+Very early days, take everything with a grain of salt.
+
+
 This blog was what inspired me to take this challenge on:
 https://codecat.nl/2024/06/hiby-r3ii-root/
 
@@ -87,8 +90,19 @@ file usr/bin/adbon usr/bin/adboff sbin/adbserver.sh sbin/kill_adbserver.sh 2>/de
 
 
 
+# Repackage the modified rootfs file
 
 ```bash
+
+python3 make_ota.py --rootfs firmware/rootfs.squashfs --out firmware/extracts/ota_output
+
+python3 make_ota.py \
+  --version 0 \
+  --rootfs /home/ericw/projects/hiby/build/rootfs.squashfs \
+  --out firmware/extracts/ota_output \
+  --kernel-name xImage \
+  --kernel-size 3760192 \
+  --kernel-md5 4a459b51a152014bfab6c1114f2701e3
 ```
 
 

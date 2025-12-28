@@ -6,6 +6,7 @@ import shutil
 FIRMWARE_BASE_DIR = "firmware"
 FIRMWARE_SOURCE_DIR = os.path.join(FIRMWARE_BASE_DIR, "sources")
 FIRMWARE_EXTRACTS_DIR = os.path.join(FIRMWARE_BASE_DIR, "extracts")
+FIRMWARE_BUILDS_DIR = os.path.join(FIRMWARE_BASE_DIR, "builds")
 # Default search path for locally installed CLI tools (cargo-installed binaries, 7-Zip, etc.)
 DEFAULT_TOOL_PATHS = [
     r"C:\Users\ericw\.cargo\bin",
@@ -53,81 +54,95 @@ def find_seven_zip_executable():
     return None
 
 
-def extract_firmware(source_dir, extracts_dir):
-    if not os.path.exists(extracts_dir):
-        os.makedirs(extracts_dir)
-
-    seven_zip_exe = find_seven_zip_executable()
-    if not seven_zip_exe:
+def extract_firmware(firmware_path, extracts_dir, dry_run=True):
+    if not (seven_zip_script := find_seven_zip_executable()):
         raise FileNotFoundError(
             "Couldn't find the '7z' command-line tool. Install 7-Zip and ensure "
             "7z.exe is on your PATH or set SEVEN_ZIP_EXE to its full path."
         )
-    print("Using 7-Zip:", seven_zip_exe)
+    print("Using 7-Zip:", seven_zip_script)
 
-    for firmware_file in os.listdir(source_dir):
-        firmware_path = os.path.join(source_dir, firmware_file)
-        if os.path.isfile(firmware_path):
-            extract_dir = os.path.abspath(
-                os.path.join(extracts_dir, os.path.splitext(firmware_file)[0])
-            )
-            os.makedirs(extract_dir, exist_ok=True)
+    if not os.path.isfile(firmware_path := os.path.abspath(firmware_path)):
+        raise FileNotFoundError(f"Firmware file not found: {firmware_path}")
+    print(f"firmware_path: {firmware_path}")
 
-            firmware_path = os.path.abspath(firmware_path)
-            print(f"firmware_path: {firmware_path}")
+    if not os.path.exists(extracts_dir):
+        os.makedirs(extracts_dir)
+    print(f"extracts_dir: {extracts_dir}")
 
-            subprocess.run(
-                [seven_zip_exe, "x", firmware_path, f"-o{extract_dir}", "-y"],
-                check=True,
-            )
+    filename = os.path.basename(firmware_path)
+    extract_dir = os.path.abspath(
+        os.path.join(extracts_dir, os.path.splitext(filename)[0])
+    )
+
+    if dry_run:
+        print(f"DRY RUN: Extract {firmware_path} to {extract_dir}")
+        return
+
+    os.makedirs(extract_dir, exist_ok=True)
+
+    subprocess.run(
+        [seven_zip_script, "x", firmware_path, f"-o{extract_dir}", "-y"],
+        check=True,
+    )
 
 
 # Concatenate the split SquashFS chunks
-def concatenate_squashfs_chunks(extracts_dir):
-    # cat rootfs.squashfs.* > rootfs.squashfs
-    # unsquashfs -s rootfs.squashfs
+def concatenate_squashfs_chunks(rootfs_chunks_dir, output_dir, dry_run=True):
+    if not os.path.isdir(rootfs_chunks_dir):
+        raise FileNotFoundError(f"Rootfs chunks dir not found: {rootfs_chunks_dir}")
+    print(f"rootfs_chunks_dir: {rootfs_chunks_dir}")
 
-    # Found a valid SQUASHFS 4:0 superblock on rootfs.squashfs.
-    # Creation or last append time Wed Jul 23 02:28:08 2025
-    # Filesystem size 33927877 bytes (33132.69 Kbytes / 32.36 Mbytes)
-    # Compression lzo
-    # Block size 131072
-    # Filesystem is exportable via NFS
-    # Inodes are compressed
-    # Data is compressed
-    # Uids/Gids (Id table) are compressed
-    # Fragments are compressed
-    # Always-use-fragments option is not specified
-    # Xattrs are compressed
-    # Duplicates are removed
-    # Number of fragments 142
-    # Number of inodes 4339
-    # Number of ids 3
-    # Number of xattr ids 0
-    ...
+    if not os.path.exists(output_dir := os.path.abspath(output_dir)) and not dry_run:
+        os.makedirs(output_dir, exist_ok=True)
+    print(f"output_dir: {output_dir}")
 
-# Extract the SquashFS filesystem
-def get_squashfs_filesystem(extracts_dir):
-    ...
+    # Concatenate split SquashFS chunks into ../rootfs.squashfs using the shell cat+redirect
+    cmd = f"cat rootfs.squashfs.* > {output_dir}/rootfs.squashfs"
+
+    if dry_run:
+        print(f"DRY RUN: {cmd} (in {rootfs_chunks_dir})")
+    else:
+        print(f"Running: {cmd} (in {rootfs_chunks_dir})")
+        subprocess.run(cmd, shell=True, check=True, cwd=rootfs_chunks_dir)
+
+    return os.path.abspath(os.path.join(rootfs_chunks_dir, "..", "rootfs.squashfs"))
 
 
-def get_firmware():
+def convert_squashfs_to_fs(squashfs_filepath, output_dir, dry_run=True):
+    cmd = f"unsquashfs -d {output_dir} {squashfs_filepath}"
 
-    # Invoke the function with the constants
-    extract_firmware(source_dir=FIRMWARE_SOURCE_DIR, extracts_dir=FIRMWARE_EXTRACTS_DIR)
+    if dry_run:
+        print(f"DRY RUN: {cmd}")
+    else:
+        print(f"Running: {cmd}")
+        subprocess.run(cmd, shell=True, check=True)
 
-    # https://github.com/onekey-sec/ubi_reader
-    # ubireader_extract_files system.ubifs
-
-    ...
 
 def main():
 
-    prepend_paths_to_env(DEFAULT_TOOL_PATHS)
+    # prepend_paths_to_env(DEFAULT_TOOL_PATHS)
 
-    # https://codecat.nl/2024/06/hiby-r3ii-root/
+    extract_firmware(
+        firmware_path=os.path.join(FIRMWARE_SOURCE_DIR, "r3proii.upt"),
+        extracts_dir=FIRMWARE_EXTRACTS_DIR,
+        dry_run=True,
+        # dry_run=False,
+    )
 
-    firmware = get_firmware()
+    concatenate_squashfs_chunks(
+        rootfs_chunks_dir=os.path.join(FIRMWARE_EXTRACTS_DIR, "r3proii", "ota_v0"),
+        output_dir=os.path.join(FIRMWARE_BUILDS_DIR, "r3proii"),
+        dry_run=True,
+        # dry_run=False,
+    )
+
+    convert_squashfs_to_fs(
+        squashfs_filepath=os.path.join(FIRMWARE_BUILDS_DIR, "r3proii", "rootfs.squashfs"),
+        output_dir=os.path.join(FIRMWARE_BUILDS_DIR, "r3proii", "rootfs_extracted"),
+        # dry_run=True,
+        dry_run=False,
+    )
 
 
 if __name__ == "__main__":

@@ -1,2 +1,10 @@
-firmware/extracts
+# Ignore extracted firmware contents but keep directory docs
+firmware/extracts/**
+!firmware/extracts/
+!firmware/extracts/**/README.md
+
+firmware/builds/**
+!firmware/builds/
+!firmware/builds/**/README.md
+
 tools/
