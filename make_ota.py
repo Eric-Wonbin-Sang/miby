@@ -38,13 +38,20 @@ def rename_chunks_with_md5(chunks: List[Path]) -> Tuple[str, List[Tuple[Path, st
     out: List[Tuple[Path, str]] = []
 
     pre_md5: Optional[str] = None
+    prev_chunk_md5: Optional[str] = None
     for idx, p in enumerate(chunks):
         h = md5_bytes(p.read_bytes())
         if idx == 0:
             pre_md5 = h
-        new_path = p.with_name(p.name + f".{h}")
+            suffix = h
+        else:
+            assert prev_chunk_md5 is not None
+            suffix = prev_chunk_md5
+
+        new_path = p.with_name(p.name + f".{suffix}")
         p.replace(new_path)
         out.append((new_path, h))
+        prev_chunk_md5 = h
 
     assert pre_md5 is not None
     return pre_md5, out
@@ -92,7 +99,8 @@ def write_ota_update_in(
 
 def touch_empty(path: Path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_bytes(b"")
+    if not path.exists() or path.stat().st_size == 0:
+        path.write_bytes(b"\n")
 
 
 @dataclass(frozen=True)
@@ -170,7 +178,7 @@ def run(
 ) -> None:
     rootfs = rootfs.expanduser().resolve()
     out_base = out_base.expanduser().resolve()
-    ota_v_dir = out_base / "ota_v0"
+    ota_v_dir = out_base / f"ota_v{ota_version}"
 
     if not rootfs.exists():
         raise FileNotFoundError(rootfs)
@@ -194,7 +202,7 @@ def run(
         rootfs_pre_md5=pre_md5,
     )
 
-    touch_empty(ota_v_dir / "ota_v0.ok")
+    touch_empty(ota_v_dir / f"ota_v{ota_version}.ok")
 
     print("Done.")
     print(f"Output: {ota_v_dir}")

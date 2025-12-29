@@ -81,10 +81,8 @@ def extract_firmware(firmware_path, extracts_dir, dry_run=True):
 
     os.makedirs(extract_dir, exist_ok=True)
 
-    subprocess.run(
-        [seven_zip_script, "x", firmware_path, f"-o{extract_dir}", "-y"],
-        check=True,
-    )
+    cmd = f'"{seven_zip_script}" x "{firmware_path}" -o"{extract_dir}" -y'
+    subprocess.run(cmd, check=True)
 
 
 # Concatenate the split SquashFS chunks
@@ -109,7 +107,7 @@ def concatenate_squashfs_chunks(rootfs_chunks_dir, output_dir, dry_run=True):
     return os.path.abspath(os.path.join(rootfs_chunks_dir, "..", "rootfs.squashfs"))
 
 
-def convert_squashfs_to_fs(squashfs_filepath, output_dir, dry_run=True):
+def expand_squashfs_to_fs(squashfs_filepath, output_dir, dry_run=True):
     cmd = f"unsquashfs -d {output_dir} {squashfs_filepath}"
 
     if dry_run:
@@ -123,25 +121,25 @@ def main():
 
     # prepend_paths_to_env(DEFAULT_TOOL_PATHS)
 
+    # dry_run = True
+    dry_run = False
+
     extract_firmware(
         firmware_path=os.path.join(FIRMWARE_SOURCE_DIR, "r3proii.upt"),
         extracts_dir=FIRMWARE_EXTRACTS_DIR,
-        dry_run=True,
-        # dry_run=False,
+        dry_run=dry_run,
     )
 
     concatenate_squashfs_chunks(
         rootfs_chunks_dir=os.path.join(FIRMWARE_EXTRACTS_DIR, "r3proii", "ota_v0"),
         output_dir=os.path.join(FIRMWARE_BUILDS_DIR, "r3proii"),
-        dry_run=True,
-        # dry_run=False,
+        dry_run=dry_run,
     )
 
-    convert_squashfs_to_fs(
+    expand_squashfs_to_fs(
         squashfs_filepath=os.path.join(FIRMWARE_BUILDS_DIR, "r3proii", "rootfs.squashfs"),
         output_dir=os.path.join(FIRMWARE_BUILDS_DIR, "r3proii", "rootfs_extracted"),
-        # dry_run=True,
-        dry_run=False,
+        dry_run=dry_run,
     )
 
 

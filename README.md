@@ -94,15 +94,28 @@ file usr/bin/adbon usr/bin/adboff sbin/adbserver.sh sbin/kill_adbserver.sh 2>/de
 
 ```bash
 
-python3 make_ota.py --rootfs firmware/rootfs.squashfs --out firmware/extracts/ota_output
+mksquashfs firmware/builds/r3proii/rootfs_extracted rootfs.squashfs \
+  -noappend \
+  -comp xz \
+  -b 131072
 
-python3 make_ota.py \
-  --version 0 \
-  --rootfs /home/ericw/projects/hiby/build/rootfs.squashfs \
-  --out firmware/extracts/ota_output \
-  --kernel-name xImage \
-  --kernel-size 3760192 \
-  --kernel-md5 4a459b51a152014bfab6c1114f2701e3
+python3 make_ota.py --rootfs rootfs.squashfs --out r3proii_repackaged --ota-version 0
+
+# python3 make_ota.py \
+#   --version 0 \
+#   --rootfs /home/ericw/projects/hiby/build/rootfs.squashfs \
+#   --out firmware/extracts/ota_output \
+#   --kernel-name xImage \
+#   --kernel-size 3760192 \
+#   --kernel-md5 4a459b51a152014bfab6c1114f2701e3
+
+genisoimage \
+  -o r3proii.upt \
+  -V CDROM \
+  -J \
+  -r \
+  r3proii_repackaged
+
 ```
 
 
