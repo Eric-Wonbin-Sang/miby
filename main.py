@@ -2,7 +2,7 @@ import subprocess
 import os
 import shutil
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Tuple, List
 import hashlib
 from functools import cached_property
 
@@ -63,6 +63,8 @@ class RootFsUtils:
     @staticmethod
     def convert_file_to_file_system(rootfs_path: Path, output_dir: Path, dry_run: bool=True):
         # delete the dir if it exists
+        if output_dir.is_dir():
+            shutil.rmtree(output_dir, ignore_errors=True)
         return run_command(f"unsquashfs -d {output_dir} {rootfs_path}", dry_run=dry_run)
 
     @staticmethod
@@ -73,37 +75,97 @@ class RootFsUtils:
                 + " -comp lzo"      # HiBy firmware uses XZ-compressed SquashFS
                 + " -b 131072"      # 128 KiB block size (must match original)
                 + " -noappend"      # Prevents modifying an existing image
-                # + " -all-root"      # Forces UID/GID = 0 (critical for reproducibility)
+                + " -all-root"      # Forces UID/GID = 0 (critical for reproducibility)
                 + " -xattrs"        # usually a default
                 + " -exports"       # usually a default
                 + " -no-tailends",  # matches “Tailends are not packed into fragments”
             dry_run=dry_run,
         )
 
+    # @staticmethod
+    # def convert_file_to_chunks(path: Path, bytes_per_chunk: int, dry_run: bool=True):
+    #     chunk_prefix: str = f"{path.name}."
+    #     run_command(
+    #         f"split --numeric-suffixes=0 --suffix-length=4 -b {bytes_per_chunk} {path.name} {chunk_prefix}",
+    #         dry_run=dry_run,
+    #         cwd=path.parent
+    #     )
+    #     if dry_run:
+    #         return
+        
+    #     # rename chunks with their md5 values appended
+    #     chunks = sorted(path.parent.glob(f"{chunk_prefix}*"))
+
+    #     if not chunks:
+    #         raise FileNotFoundError(f"No files found with prefix '{chunk_prefix}' in {path}")
+
+    #     for idx, path in enumerate(chunks):
+    #         md5 = Md5Utils.get_file_md5(path)
+    #         new_name = f"{path.name}.{md5}"
+    #         new_path = path.with_name(new_name)
+
+    #         print(f"{path.name} -> {new_name}")
+    #         path.rename(new_path)
+
     @staticmethod
-    def convert_file_to_chunks(path: Path, bytes_per_chunk: int, dry_run: bool=True):
+    def convert_file_to_chunks(
+        path: Path,
+        bytes_per_chunk: int,
+        dry_run: bool = True,
+    ) -> Tuple[Optional[str], List[str]]:
+        """
+        HiBy/official format:
+
+        - Split into numeric chunks: <name>.0000, <name>.0001, ...
+        - Compute md5 for each chunk's CONTENT.
+        - Rename each chunk to: <name>.<index4>.<md5(chunk_i)>
+        - pre_md5 = md5(chunk_0000)
+        - Write: ota_md5_<name>.<pre_md5> whose contents are md5s for chunks 0001..end (one per line)
+
+        Returns:
+          (pre_md5, chunk_md5s)
+            pre_md5 = md5(chunk0) or None if dry_run
+            chunk_md5s = [md5(chunk0), md5(chunk1), ...] (empty if dry_run)
+        """
         chunk_prefix: str = f"{path.name}."
+
         run_command(
             f"split --numeric-suffixes=0 --suffix-length=4 -b {bytes_per_chunk} {path.name} {chunk_prefix}",
             dry_run=dry_run,
-            cwd=path.parent
+            cwd=path.parent,
         )
+
         if dry_run:
-            return
-        
-        # rename chunks with their md5 values appended
-        chunks = sorted(path.parent.glob(f"{chunk_prefix}*"))
+            return None, []
 
-        if not chunks:
-            raise FileNotFoundError(f"No files found with prefix '{chunk_prefix}' in {path}")
+        # ONLY grab the numeric stage outputs, not already-renamed files
+        numeric_chunks = sorted(path.parent.glob(f"{chunk_prefix}[0-9][0-9][0-9][0-9]"))
+        if not numeric_chunks:
+            raise FileNotFoundError(
+                f"No numeric chunk files found with prefix '{chunk_prefix}' in {path.parent}"
+            )
 
-        for idx, path in enumerate(chunks):
-            md5 = Md5Utils.get_file_md5(path)
-            new_name = f"{path.name}.{md5}"
-            new_path = path.with_name(new_name)
+        # md5 each chunk content in order
+        chunk_md5s: List[str] = [Md5Utils.get_file_md5(p) for p in numeric_chunks]
+        pre_md5: str = chunk_md5s[0]
 
-            print(f"{path.name} -> {new_name}")
-            path.rename(new_path)
+        # rename each chunk to include its own md5
+        renamed_paths: List[Path] = []
+        for p, md5 in zip(numeric_chunks, chunk_md5s):
+            new_name = f"{p.name}.{md5}"
+            new_path = p.with_name(new_name)
+            print(f"{p.name} -> {new_name}")
+            p.rename(new_path)
+            renamed_paths.append(new_path)
+
+        # write ota_md5_<img_name>.<pre_md5> listing md5s for chunks 0001..end
+        if not dry_run:
+            md5_list_path = path.parent / f"ota_md5_{path.name}.{pre_md5}"
+            md5_list_text = "\n".join(chunk_md5s[1:]) + "\n"  # IMPORTANT: skip chunk0
+            md5_list_path.write_text(md5_list_text, encoding="utf-8")
+            print(f"Wrote {md5_list_path.name} ({len(chunk_md5s) - 1} lines)")
+
+        return pre_md5, chunk_md5s
 
     @staticmethod
     def update_ota_file_with_new_rootfs_chunks(chunks_dir, ota_update_file, dry_run: bool=True):
@@ -150,6 +212,17 @@ class RootFsUtils:
             return
         ota_update_file.write_text(ret_str, encoding="utf-8")
 
+
+
+class StorageModel:
+
+    ROOTFS_FILENAME = "rootfs.squashfs"
+    OTA_MD5_ROOTFS_FILE_PREFIX = f"ota_md5_{ROOTFS_FILENAME}."
+
+    def __init__(self):
+        ...
+
+
 class FirmwareExtractor:
 
     ROOTFS_FILENAME = "rootfs.squashfs"
@@ -194,6 +267,7 @@ class FirmwareExtractor:
             dry_run=dry_run,
         )
 
+
 class ExtractedFirmwareBundler:
 
     OTA_UPDATE_FILENAME: str = "ota_update.in"
@@ -219,7 +293,7 @@ class ExtractedFirmwareBundler:
         bundle_chunks_dir = self.rootfs_chunks_dir
         print("(DRY) " if dry_run else "" + f"Removing files prefixed with {self.extractor.ROOTFS_FILENAME} in {bundle_chunks_dir}")
         for p in bundle_chunks_dir.iterdir():
-            if not p.name.startswith(self.extractor.ROOTFS_FILENAME):
+            if not p.name.startswith(self.extractor.ROOTFS_FILENAME) and not p.name.startswith(StorageModel.OTA_MD5_ROOTFS_FILE_PREFIX):
                 continue
             if dry_run:
                 continue
@@ -262,7 +336,7 @@ class ExtractedFirmwareBundler:
         # bundle everything back into a upt file
         UptUtils.package(
             content_dir=self.bundler_dir,
-            output_path=Path(f"{self.firmware_path.name}_new"),
+            output_path=Path(f"{self.firmware_path.name}"),
             dry_run=dry_run,
         )
 
@@ -270,7 +344,7 @@ def main():
     extractor = FirmwareExtractor(
         firmware_path=Path("firmware/r3proii.upt"),
     )
-    # extractor.run(dry_run=False)
+    extractor.run(dry_run=False)
     print(RootFsUtils.get_file_info(extractor.concatted_rootfs_file, dry_run=False))
     # print(RootFsUtils.get_fs_xattrs(extractor.concatted_rootfs_file, dry_run=False))
     
