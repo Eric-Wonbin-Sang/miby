@@ -147,8 +147,9 @@ class RootFsUtils:
         data_dicts, current_dict = [], {}
         for line in ota_update_file.read_text(encoding="utf-8").split("\n"):
             if line.strip() == "":
-                data_dicts.append(current_dict)
-                current_dict = {}
+                if current_dict:
+                    data_dicts.append(current_dict)
+                    current_dict = {}
             else:
                 key, value = line.split("=", 1)
                 current_dict[key] = value
@@ -170,14 +171,14 @@ class RootFsUtils:
         chunks = sorted_rootfs_chunks(chunks_dir)
         for c in chunks:
             print(c)
-        total_size = sum(p.stat().st_size for p in chunks)
-        total_md5 = md5_of_concatenated_chunks(chunks)
+        img_size = sum(p.stat().st_size for p in chunks)
+        img_md5 = chunks[0].name.split(".")[-1]  # the md5 key used for the first chunk
 
         ret_str = ""
         for data in data_dicts:
             if data.get("img_type") == "rootfs":
-                data["img_size"] = str(total_size)
-                data["img_md5"] = str(total_md5)
+                data["img_size"] = str(img_size)
+                data["img_md5"] = str(img_md5)
             for key, value in data.items():
                 ret_str += f"{key}={value}\n"
             ret_str += "\n"
