@@ -188,7 +188,6 @@ class RootFsUtils:
         ota_update_file.write_text(ret_str, encoding="utf-8")
 
 
-
 class StorageModel:
 
     ROOTFS_FILENAME            : str = "rootfs.squashfs"
@@ -196,8 +195,24 @@ class StorageModel:
     CHUNKS_DIR_NAME            : str = "ota_v0"
     OTA_UPDATE_FILENAME        : str = "ota_update.in"
 
-    def __init__(self):
-        ...
+    def __init__(self, base_dir: Path):
+        self.base_dir = base_dir
+
+    @cached_property
+    def extracted_chunks_dir(self) -> Path:
+        return self.base_dir / self.CHUNKS_DIR_NAME
+
+    @cached_property
+    def ota_update_path(self) -> Path:
+        return self.extracted_chunks_dir / self.OTA_UPDATE_FILENAME
+
+    @cached_property
+    def rootfs_path(self) -> Path:
+        return self.extracted_chunks_dir / self.ROOTFS_FILENAME
+
+    @cached_property
+    def extracted_rootfs_path(self) -> Path:
+        return self.extracted_chunks_dir / f"{self.ROOTFS_FILENAME}_extracted"
 
 
 class FirmwareExtractor:
@@ -206,38 +221,24 @@ class FirmwareExtractor:
         assert (firmware_path := firmware_path).is_file(), f"{firmware_path} is not a file!"
         self.firmware_path: Path = firmware_path
 
-    @cached_property
-    def extract_dir(self) -> Path:
-        return (self.firmware_path.parent / f"{self.firmware_path.name}_extracted")
-
-    @cached_property
-    def extracted_chunks_dir(self) -> Path:
-        return (self.extract_dir / StorageModel.CHUNKS_DIR_NAME)
-
-    @cached_property
-    def concatted_rootfs_file(self) -> Path:
-        return self.extracted_chunks_dir / StorageModel.ROOTFS_FILENAME
-
-    @cached_property
-    def extracted_rootfs_path(self) -> Path:
-        return self.extracted_chunks_dir / f"{StorageModel.ROOTFS_FILENAME}_extracted"
+        self.storage_model = StorageModel(self.firmware_path.parent / f"{self.firmware_path.name}_extracted")
 
     def run(self, dry_run=True):
         # unzip the upt archive
-        UptUtils.extract(self.firmware_path, self.extract_dir, dry_run)
+        UptUtils.extract(self.firmware_path, self.storage_model.base_dir, dry_run)
 
         # concat all of the chunks into one rootfs file
         rootfs_path = RootFsUtils.convert_chunks_to_file(
-            chunks_dir=self.extracted_chunks_dir,
+            chunks_dir=self.storage_model.extracted_chunks_dir,
             chunk_pattern=f"{StorageModel.ROOTFS_FILENAME}.*",
-            output_path=self.extracted_chunks_dir / StorageModel.ROOTFS_FILENAME,
+            output_path=self.storage_model.rootfs_path,
             dry_run=dry_run,
         )
 
         # convert the rootfs file to the read-only filesystem
         RootFsUtils.convert_file_to_file_system(
             rootfs_path=rootfs_path,
-            output_dir=self.extracted_rootfs_path,
+            output_dir=self.storage_model.extracted_rootfs_path,
             dry_run=dry_run,
         )
 
@@ -246,23 +247,17 @@ class ExtractedFirmwareBundler:
     
     def __init__(self, firmware_path: Path, extractor: FirmwareExtractor) -> None:
         assert firmware_path.is_file(), f"{firmware_path} is not a file!"
-        assert extractor.extract_dir.is_dir(), f"{extractor.extract_dir} is not a dir!"
+        assert extractor.storage_model.base_dir.is_dir(), f"{extractor.storage_model.base_dir} is not a dir!"
         self.firmware_path = firmware_path
         self.extractor = extractor
 
-    @cached_property
-    def bundler_dir(self) -> Path:
-        return (self.firmware_path.parent / f"{self.firmware_path.name}_bundle")
-
-    @cached_property
-    def rootfs_chunks_dir(self) -> Path:
-        return self.bundler_dir / StorageModel.CHUNKS_DIR_NAME
+        self.storage_model = StorageModel(self.firmware_path.parent / f"{self.firmware_path.name}_bundle")
 
     def copy_extracted_dir(self, dry_run: bool=True):
-        return run_command(f"cp -a {self.extractor.extract_dir}{os.sep}. {self.bundler_dir}", dry_run=dry_run)
+        return run_command(f"cp -a {self.extractor.storage_model.base_dir}{os.sep}. {self.storage_model.base_dir}", dry_run=dry_run)
 
     def remove_rootfs_files(self, dry_run=True):
-        bundle_chunks_dir = self.rootfs_chunks_dir
+        bundle_chunks_dir = self.storage_model.extracted_chunks_dir
         print("(DRY) " if dry_run else "" + f"Removing files prefixed with {StorageModel.ROOTFS_FILENAME} in {bundle_chunks_dir}")
         for p in bundle_chunks_dir.iterdir():
             if not p.name.startswith(StorageModel.ROOTFS_FILENAME) and not p.name.startswith(StorageModel.OTA_MD5_ROOTFS_FILE_PREFIX):
@@ -281,9 +276,9 @@ class ExtractedFirmwareBundler:
         self.remove_rootfs_files(dry_run=dry_run)
     
         # convert the extracted file system to the singular rootfs file  
-        rootfs_path = self.rootfs_chunks_dir / StorageModel.ROOTFS_FILENAME
+        rootfs_path = self.storage_model.rootfs_path
         RootFsUtils.convert_file_system_to_file(
-            file_system_dir=self.extractor.extracted_rootfs_path,
+            file_system_dir=self.extractor.storage_model.extracted_rootfs_path,
             output_path=rootfs_path,
             dry_run=dry_run
         )
@@ -301,25 +296,26 @@ class ExtractedFirmwareBundler:
 
         # ota_update.in needs to have the correct rootfs info
         RootFsUtils.update_ota_file_with_new_rootfs_chunks(
-            chunks_dir=self.rootfs_chunks_dir,
-            ota_update_file=self.rootfs_chunks_dir / StorageModel.OTA_UPDATE_FILENAME,
+            chunks_dir=self.storage_model.extracted_chunks_dir,
+            ota_update_file=self.storage_model.ota_update_path,
             dry_run=dry_run,
         )
         # bundle everything back into a upt file
         UptUtils.package(
-            content_dir=self.bundler_dir,
+            content_dir=self.storage_model.base_dir,
             output_path=Path(f"{self.firmware_path.name}"),
             dry_run=dry_run,
         )
+
 
 def main():
     extractor = FirmwareExtractor(
         firmware_path=Path("firmware/r3proii.upt"),
     )
     extractor.run(dry_run=False)
-    print(RootFsUtils.get_file_info(extractor.concatted_rootfs_file, dry_run=False))
-    # print(RootFsUtils.get_fs_xattrs(extractor.concatted_rootfs_file, dry_run=False))
-    
+    print(RootFsUtils.get_file_info(extractor.storage_model.rootfs_path, dry_run=False))
+    # print(RootFsUtils.get_fs_xattrs(extractor.storage_model.rootfs_path, dry_run=False))
+
     bundler = ExtractedFirmwareBundler(
         firmware_path=extractor.firmware_path,
         extractor=extractor
