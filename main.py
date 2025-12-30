@@ -1,147 +1,290 @@
-import os
 import subprocess
+import os
 import shutil
+from pathlib import Path
+from typing import Optional
+import hashlib
+from functools import cached_property
 
 
-FIRMWARE_BASE_DIR = "firmware"
-FIRMWARE_SOURCE_DIR = os.path.join(FIRMWARE_BASE_DIR, "sources")
-FIRMWARE_EXTRACTS_DIR = os.path.join(FIRMWARE_BASE_DIR, "extracts")
-FIRMWARE_BUILDS_DIR = os.path.join(FIRMWARE_BASE_DIR, "builds")
-# Default search path for locally installed CLI tools (cargo-installed binaries, 7-Zip, etc.)
-DEFAULT_TOOL_PATHS = [
-    r"C:\Users\ericw\.cargo\bin",
-    r"C:\Program Files\7-Zip",
-    r"C:\Program Files (x86)\7-Zip",
-]
-
-
-def prepend_paths_to_env(paths):
-    if not paths:
+def run_command(cmd: str, dry_run: bool=True, **run_kwargs: dict):
+    run_kwargs = {"shell": True, "check": True, **(run_kwargs or {})}
+    print(("(DRY) "if dry_run else "") + f"Running: \"{cmd}\" with kwargs={run_kwargs}")
+    if dry_run:
         return
-
-    current = os.environ.get("PATH", "")
-    current_parts = [part for part in current.split(os.pathsep) if part]
-    new_parts = []
-
-    for path in paths:
-        expanded = os.path.normpath(os.path.expandvars(os.path.expanduser(path)))
-        if expanded and expanded not in current_parts and expanded not in new_parts:
-            new_parts.append(expanded)
-
-    if new_parts:
-        os.environ["PATH"] = os.pathsep.join(new_parts + current_parts)
+    return subprocess.run(cmd, **run_kwargs)
 
 
-def find_seven_zip_executable():
-    candidates = [
-        os.environ.get("SEVEN_ZIP_EXE"),
-        r"C:\Program Files\7-Zip\7z.exe",
-        r"C:\Program Files (x86)\7-Zip\7z.exe",
-        "7z",
-        "7z.exe",
-        "7za",
-        "7za.exe",
-    ]
+class UptUtils:
 
-    for candidate in candidates:
-        if not candidate:
-            continue
-
-        resolved = shutil.which(candidate)
-        if resolved:
-            return resolved
-
-    return None
-
-
-def extract_firmware(firmware_path, extracts_dir, dry_run=True):
-    if not (seven_zip_script := find_seven_zip_executable()):
-        raise FileNotFoundError(
-            "Couldn't find the '7z' command-line tool. Install 7-Zip and ensure "
-            "7z.exe is on your PATH or set SEVEN_ZIP_EXE to its full path."
+    @staticmethod
+    def extract(filepath: Path, output_dir: Path, dry_run: bool=True):
+        if not output_dir.exists():
+            output_dir.mkdir()
+        return run_command(f"7z x {filepath} -o{output_dir} -y", dry_run=dry_run)
+    
+    @staticmethod
+    def package(content_dir: Path, output_path: Path, dry_run: bool=True):
+        return run_command(
+            f"genisoimage -o {output_path} -V CDROM -J -r {content_dir}",
+            dry_run=dry_run,
         )
-    print("Using 7-Zip:", seven_zip_script)
-
-    if not os.path.isfile(firmware_path := os.path.abspath(firmware_path)):
-        raise FileNotFoundError(f"Firmware file not found: {firmware_path}")
-    print(f"firmware_path: {firmware_path}")
-
-    if not os.path.exists(extracts_dir):
-        os.makedirs(extracts_dir)
-    print(f"extracts_dir: {extracts_dir}")
-
-    filename = os.path.basename(firmware_path)
-    extract_dir = os.path.abspath(
-        os.path.join(extracts_dir, os.path.splitext(filename)[0])
-    )
-
-    if dry_run:
-        print(f"DRY RUN: Extract {firmware_path} to {extract_dir}")
-        return
-
-    os.makedirs(extract_dir, exist_ok=True)
-
-    cmd = f'"{seven_zip_script}" x "{firmware_path}" -o"{extract_dir}" -y'
-    subprocess.run(cmd, check=True)
 
 
-# Concatenate the split SquashFS chunks
-def concatenate_squashfs_chunks(rootfs_chunks_dir, output_dir, dry_run=True):
-    if not os.path.isdir(rootfs_chunks_dir):
-        raise FileNotFoundError(f"Rootfs chunks dir not found: {rootfs_chunks_dir}")
-    print(f"rootfs_chunks_dir: {rootfs_chunks_dir}")
+class Md5Utils:
 
-    if not os.path.exists(output_dir := os.path.abspath(output_dir)) and not dry_run:
-        os.makedirs(output_dir, exist_ok=True)
-    print(f"output_dir: {output_dir}")
-
-    # Concatenate split SquashFS chunks into ../rootfs.squashfs using the shell cat+redirect
-    cmd = f"cat rootfs.squashfs.* > {output_dir}/rootfs.squashfs"
-
-    if dry_run:
-        print(f"DRY RUN: {cmd} (in {rootfs_chunks_dir})")
-    else:
-        print(f"Running: {cmd} (in {rootfs_chunks_dir})")
-        subprocess.run(cmd, shell=True, check=True, cwd=rootfs_chunks_dir)
-
-    return os.path.abspath(os.path.join(rootfs_chunks_dir, "..", "rootfs.squashfs"))
+    @staticmethod
+    def get_file_md5(path: Path, buffer_size: int = 1024 * 1024) -> str:
+        """Compute MD5 of a file in a streaming-safe way."""
+        h = hashlib.md5()
+        with path.open("rb") as f:
+            for chunk in iter(lambda: f.read(buffer_size), b""):
+                h.update(chunk)
+        return h.hexdigest()
 
 
-def expand_squashfs_to_fs(squashfs_filepath, output_dir, dry_run=True):
-    cmd = f"unsquashfs -d {output_dir} {squashfs_filepath}"
+class RootFsUtils:
 
-    if dry_run:
-        print(f"DRY RUN: {cmd}")
-    else:
-        print(f"Running: {cmd}")
-        subprocess.run(cmd, shell=True, check=True)
+    @staticmethod
+    def get_file_info(path: Path, dry_run: bool=True):
+        print("\n\n\n\n")
+        return run_command(f"unsquashfs -s {path}", dry_run=dry_run)
 
+    @staticmethod
+    def get_fs_xattrs(path: Path, dry_run: bool=True):
+        return run_command(f"unsquashfs -lls {path}", dry_run=dry_run)
+
+    @staticmethod
+    def convert_chunks_to_file(chunks_dir: Path, chunk_pattern: str, output_path: Path, dry_run: bool=True):
+        assert chunks_dir.is_dir(), FileNotFoundError(f"chunks_dir {chunks_dir} is not a dir!")
+        run_command(f"cat {chunks_dir / chunk_pattern} > {output_path}", dry_run=dry_run)
+        return output_path
+
+    @staticmethod
+    def convert_file_to_file_system(rootfs_path: Path, output_dir: Path, dry_run: bool=True):
+        # delete the dir if it exists
+        return run_command(f"unsquashfs -d {output_dir} {rootfs_path}", dry_run=dry_run)
+
+    @staticmethod
+    def convert_file_system_to_file(file_system_dir: Path, output_path: Path, dry_run: bool=True):
+        """use RootFsUtils.get_file_info to determine parameters"""
+        return run_command(
+            f"mksquashfs {file_system_dir} {output_path}"
+                + " -comp lzo"      # HiBy firmware uses XZ-compressed SquashFS
+                + " -b 131072"      # 128 KiB block size (must match original)
+                + " -noappend"      # Prevents modifying an existing image
+                # + " -all-root"      # Forces UID/GID = 0 (critical for reproducibility)
+                + " -xattrs"        # usually a default
+                + " -exports"       # usually a default
+                + " -no-tailends",  # matches “Tailends are not packed into fragments”
+            dry_run=dry_run,
+        )
+
+    @staticmethod
+    def convert_file_to_chunks(path: Path, bytes_per_chunk: int, dry_run: bool=True):
+        chunk_prefix: str = f"{path.name}."
+        run_command(
+            f"split --numeric-suffixes=0 --suffix-length=4 -b {bytes_per_chunk} {path.name} {chunk_prefix}",
+            dry_run=dry_run,
+            cwd=path.parent
+        )
+        if dry_run:
+            return
+        
+        # rename chunks with their md5 values appended
+        chunks = sorted(path.parent.glob(f"{chunk_prefix}*"))
+
+        if not chunks:
+            raise FileNotFoundError(f"No files found with prefix '{chunk_prefix}' in {path}")
+
+        for idx, path in enumerate(chunks):
+            md5 = Md5Utils.get_file_md5(path)
+            new_name = f"{path.name}.{md5}"
+            new_path = path.with_name(new_name)
+
+            print(f"{path.name} -> {new_name}")
+            path.rename(new_path)
+
+    @staticmethod
+    def update_ota_file_with_new_rootfs_chunks(chunks_dir, ota_update_file, dry_run: bool=True):
+        data_dicts, current_dict = [], {}
+        for line in ota_update_file.read_text(encoding="utf-8").split("\n"):
+            if line.strip() == "":
+                data_dicts.append(current_dict)
+                current_dict = {}
+            else:
+                key, value = line.split("=", 1)
+                current_dict[key] = value
+
+        def sorted_rootfs_chunks(chunks_dir: Path) -> list[Path]:
+            return sorted(
+                chunks_dir.glob("rootfs.squashfs.*.*"),
+                key=lambda p: int(p.name.split(".")[-2])
+            )
+
+        def md5_of_concatenated_chunks(chunks: list[Path]) -> str:
+            h = hashlib.md5()
+            for chunk in chunks:
+                with chunk.open("rb") as f:
+                    for buf in iter(lambda: f.read(1024 * 1024), b""):
+                        h.update(buf)
+            return h.hexdigest()
+
+        chunks = sorted_rootfs_chunks(chunks_dir)
+        for c in chunks:
+            print(c)
+        total_size = sum(p.stat().st_size for p in chunks)
+        total_md5 = md5_of_concatenated_chunks(chunks)
+
+        ret_str = ""
+        for data in data_dicts:
+            if data.get("img_type") == "rootfs":
+                data["img_size"] = str(total_size)
+                data["img_md5"] = str(total_md5)
+            for key, value in data.items():
+                ret_str += f"{key}={value}\n"
+            ret_str += "\n"
+
+        print("(Dry) " if dry_run else "" + f"Updating {ota_update_file.name} with new rootfs info")
+        if (dry_run):
+            return
+        ota_update_file.write_text(ret_str, encoding="utf-8")
+
+class FirmwareExtractor:
+
+    ROOTFS_FILENAME = "rootfs.squashfs"
+    CHUNKS_DIR_NAME = "ota_v0"
+
+    def __init__(self, firmware_path: Path) -> None:
+        assert (firmware_path := firmware_path.absolute()).is_file(), f"{firmware_path} is not a file!"
+        self.firmware_path: Path = firmware_path
+
+    @cached_property
+    def extract_dir(self) -> Path:
+        return (self.firmware_path.parent / f"{self.firmware_path.name}_extracted").absolute()
+
+    @cached_property
+    def extracted_chunks_dir(self) -> Path:
+        return (self.extract_dir / self.CHUNKS_DIR_NAME).absolute()
+
+    @cached_property
+    def concatted_rootfs_file(self) -> Path:
+        return self.extracted_chunks_dir / self.ROOTFS_FILENAME
+
+    @cached_property
+    def extracted_rootfs_path(self) -> Path:
+        return self.extracted_chunks_dir / f"{self.ROOTFS_FILENAME}_extracted"
+
+    def run(self, dry_run=True):
+        # unzip the upt archive
+        UptUtils.extract(self.firmware_path, self.extract_dir, dry_run)
+
+        # concat all of the chunks into one rootfs file
+        rootfs_path = RootFsUtils.convert_chunks_to_file(
+            chunks_dir=self.extracted_chunks_dir,
+            chunk_pattern=f"{self.ROOTFS_FILENAME}.*",
+            output_path=self.extracted_chunks_dir / self.ROOTFS_FILENAME,
+            dry_run=dry_run,
+        )
+
+        # convert the rootfs file to the read-only filesystem
+        RootFsUtils.convert_file_to_file_system(
+            rootfs_path=rootfs_path,
+            output_dir=self.extracted_rootfs_path,
+            dry_run=dry_run,
+        )
+
+class ExtractedFirmwareBundler:
+
+    OTA_UPDATE_FILENAME: str = "ota_update.in"
+    
+    def __init__(self, firmware_path: Path, extractor: FirmwareExtractor) -> None:
+        assert firmware_path.is_file(), f"{firmware_path} is not a file!"
+        assert extractor.extract_dir.is_dir(), f"{extractor.extract_dir} is not a dir!"
+        self.firmware_path = firmware_path
+        self.extractor = extractor
+
+    @cached_property
+    def bundler_dir(self) -> Path:
+        return (self.firmware_path.parent / f"{self.firmware_path.name}_bundle")
+
+    @cached_property
+    def rootfs_chunks_dir(self) -> Path:
+        return self.bundler_dir / self.extractor.CHUNKS_DIR_NAME
+
+    def copy_extracted_dir(self, dry_run: bool=True):
+        return run_command(f"cp -a {self.extractor.extract_dir}{os.sep}. {self.bundler_dir}", dry_run=dry_run)
+
+    def remove_rootfs_files(self, dry_run=True):
+        bundle_chunks_dir = self.rootfs_chunks_dir
+        print("(DRY) " if dry_run else "" + f"Removing files prefixed with {self.extractor.ROOTFS_FILENAME} in {bundle_chunks_dir}")
+        for p in bundle_chunks_dir.iterdir():
+            if not p.name.startswith(self.extractor.ROOTFS_FILENAME):
+                continue
+            if dry_run:
+                continue
+            if p.is_file():
+                p.unlink(missing_ok=True)
+            else:
+                shutil.rmtree(p, ignore_errors=True)
+
+    def run(self, dry_run=True):
+        # make a copy of the extracted dir under "{firmware name}_bundled"
+        self.copy_extracted_dir(dry_run=dry_run)
+        # remove the rootfs files since we need to "compile" those
+        self.remove_rootfs_files(dry_run=dry_run)
+    
+        # convert the extracted file system to the singular rootfs file  
+        rootfs_path = self.rootfs_chunks_dir / FirmwareExtractor.ROOTFS_FILENAME
+        RootFsUtils.convert_file_system_to_file(
+            file_system_dir=self.extractor.extracted_rootfs_path,
+            output_path=rootfs_path,
+            dry_run=dry_run
+        )
+        print(RootFsUtils.get_file_info(rootfs_path, dry_run=dry_run))
+        # print(RootFsUtils.get_fs_xattrs(rootfs_path, dry_run=False))
+        
+        # convert the rootfs file to chunks
+        RootFsUtils.convert_file_to_chunks(
+            path=rootfs_path,
+            bytes_per_chunk=524288,  # 512 KiB
+            dry_run=dry_run
+        )
+        # remove the mother file
+        rootfs_path.unlink()
+
+        # ota_update.in needs to have the correct rootfs info
+        RootFsUtils.update_ota_file_with_new_rootfs_chunks(
+            chunks_dir=self.rootfs_chunks_dir,
+            ota_update_file=self.rootfs_chunks_dir / self.OTA_UPDATE_FILENAME,
+            dry_run=dry_run,
+        )
+        # bundle everything back into a upt file
+        UptUtils.package(
+            content_dir=self.bundler_dir,
+            output_path=Path(f"{self.firmware_path.name}_new"),
+            dry_run=dry_run,
+        )
 
 def main():
-
-    # prepend_paths_to_env(DEFAULT_TOOL_PATHS)
-
-    # dry_run = True
-    dry_run = False
-
-    extract_firmware(
-        firmware_path=os.path.join(FIRMWARE_SOURCE_DIR, "r3proii.upt"),
-        extracts_dir=FIRMWARE_EXTRACTS_DIR,
-        dry_run=dry_run,
+    extractor = FirmwareExtractor(
+        firmware_path=Path("firmware/r3proii.upt"),
     )
-
-    concatenate_squashfs_chunks(
-        rootfs_chunks_dir=os.path.join(FIRMWARE_EXTRACTS_DIR, "r3proii", "ota_v0"),
-        output_dir=os.path.join(FIRMWARE_BUILDS_DIR, "r3proii"),
-        dry_run=dry_run,
+    # extractor.run(dry_run=False)
+    print(RootFsUtils.get_file_info(extractor.concatted_rootfs_file, dry_run=False))
+    # print(RootFsUtils.get_fs_xattrs(extractor.concatted_rootfs_file, dry_run=False))
+    
+    bundler = ExtractedFirmwareBundler(
+        firmware_path=extractor.firmware_path,
+        extractor=extractor
     )
-
-    expand_squashfs_to_fs(
-        squashfs_filepath=os.path.join(FIRMWARE_BUILDS_DIR, "r3proii", "rootfs.squashfs"),
-        output_dir=os.path.join(FIRMWARE_BUILDS_DIR, "r3proii", "rootfs_extracted"),
-        dry_run=dry_run,
-    )
+    bundler.run(dry_run=False)
 
 
 if __name__ == "__main__":
     main()
+
+
+# sudo pacman -S squashfs-tools
+# sudo pacman -S 7zip
+# sudo pacman -S binwalk
