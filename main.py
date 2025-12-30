@@ -82,31 +82,6 @@ class RootFsUtils:
             dry_run=dry_run,
         )
 
-    # @staticmethod
-    # def convert_file_to_chunks(path: Path, bytes_per_chunk: int, dry_run: bool=True):
-    #     chunk_prefix: str = f"{path.name}."
-    #     run_command(
-    #         f"split --numeric-suffixes=0 --suffix-length=4 -b {bytes_per_chunk} {path.name} {chunk_prefix}",
-    #         dry_run=dry_run,
-    #         cwd=path.parent
-    #     )
-    #     if dry_run:
-    #         return
-        
-    #     # rename chunks with their md5 values appended
-    #     chunks = sorted(path.parent.glob(f"{chunk_prefix}*"))
-
-    #     if not chunks:
-    #         raise FileNotFoundError(f"No files found with prefix '{chunk_prefix}' in {path}")
-
-    #     for idx, path in enumerate(chunks):
-    #         md5 = Md5Utils.get_file_md5(path)
-    #         new_name = f"{path.name}.{md5}"
-    #         new_path = path.with_name(new_name)
-
-    #         print(f"{path.name} -> {new_name}")
-    #         path.rename(new_path)
-
     @staticmethod
     def convert_file_to_chunks(
         path: Path,
