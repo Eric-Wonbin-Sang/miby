@@ -319,3 +319,6 @@ if __name__ == "__main__":
 # sudo pacman -S binwalk
 
 # sudo rm -rf firmware/r3proii.upt_bundle firmware/r3proii.upt_extracted
+
+# adb push "C:\path\to\song.flac" /usr/data/mnt/sd_0/Music/
+# Verify: adb shell "ls -la /usr/data/mnt/sd_0/Music"
