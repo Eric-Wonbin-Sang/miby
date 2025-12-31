@@ -317,8 +317,9 @@ if __name__ == "__main__":
 # sudo pacman -S squashfs-tools
 # sudo pacman -S 7zip
 # sudo pacman -S binwalk
+# sudo pacman -S android-tools
 
 # sudo rm -rf firmware/r3proii.upt_bundle firmware/r3proii.upt_extracted
 
 # adb push "C:\path\to\song.flac" /usr/data/mnt/sd_0/Music/
-# Verify: adb shell "ls -la /usr/data/mnt/sd_0/Music"
+# adb shell "ls -la /data/mnt/sd_0"
