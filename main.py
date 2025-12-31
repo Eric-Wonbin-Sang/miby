@@ -58,7 +58,6 @@ class RootFsUtils:
     def convert_chunks_to_file(chunks_dir: Path, chunk_pattern: str, output_path: Path, dry_run: bool=True):
         assert chunks_dir.is_dir(), FileNotFoundError(f"chunks_dir {chunks_dir} is not a dir!")
         run_command(f"cat {chunks_dir / chunk_pattern} > {output_path}", dry_run=dry_run)
-        
         return output_path
 
     @staticmethod
