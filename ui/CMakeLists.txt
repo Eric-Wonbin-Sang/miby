@@ -13,14 +13,27 @@ include_directories(
   ${CMAKE_CURRENT_SOURCE_DIR}/third_party/lvgl/src
 )
 
-find_package(SDL2 REQUIRED)
+# Platform options (set by build.sh)
+option(UI_PLATFORM_SDL "Build with SDL window/input" ON)
+option(UI_PLATFORM_FBDEV "Build with Linux FBDEV display" OFF)
+
+if(UI_PLATFORM_SDL)
+  add_compile_definitions(UI_PLATFORM_SDL)
+  find_package(SDL2 REQUIRED)
+endif()
 
 file(GLOB_RECURSE LVGL_SRC
   third_party/lvgl/src/*.c
 )
 add_library(lvgl STATIC ${LVGL_SRC})
 
-target_link_libraries(lvgl PRIVATE ${SDL2_LIBRARIES})
+if(UI_PLATFORM_SDL)
+  target_link_libraries(lvgl PRIVATE ${SDL2_LIBRARIES})
+endif()
 
 add_executable(ui_app src/main.cpp)
-target_link_libraries(ui_app PRIVATE lvgl ${SDL2_LIBRARIES})
+target_link_libraries(ui_app PRIVATE lvgl)
+
+if(UI_PLATFORM_SDL)
+  target_link_libraries(ui_app PRIVATE ${SDL2_LIBRARIES})
+endif()

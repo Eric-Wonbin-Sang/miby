@@ -8,9 +8,26 @@
 
 #define LV_USE_LABEL 1
 #define LV_USE_BTN 1
+#define LV_USE_LIST 1
+#define LV_USE_TEXTAREA 1
+#define LV_USE_FLEX 1
 
-#define LV_MEM_SIZE (256U * 1024U)
+#if defined(UI_PLATFORM_SDL)
+#  define LV_MEM_SIZE (8U * 1024U * 1024U)
+#else
+#  define LV_MEM_SIZE (512U * 1024U)
+#endif
 
-/* Enable SDL-based drivers from LVGL (v9) */
-#define LV_USE_SDL 1
-#define LV_SDL_INCLUDE_PATH <SDL2/SDL.h>
+/* Platform-specific LVGL drivers */
+#if defined(UI_PLATFORM_SDL)
+#  define LV_USE_SDL 1
+#  define LV_SDL_INCLUDE_PATH <SDL2/SDL.h>
+#else
+#  define LV_USE_SDL 0
+#endif
+
+#if defined(UI_PLATFORM_FBDEV)
+#  define LV_USE_LINUX_FBDEV 1
+#else
+#  define LV_USE_LINUX_FBDEV 0
+#endif
