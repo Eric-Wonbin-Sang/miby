@@ -22,7 +22,7 @@ class UptUtils:
         if not output_dir.exists():
             output_dir.mkdir()
         return run_command(f"7z x {filepath} -o{output_dir} -y", dry_run=dry_run)
-    
+
     @staticmethod
     def package(content_dir: Path, output_path: Path, dry_run: bool=True):
         return run_command(
@@ -225,8 +225,20 @@ class FirmwareExtractor:
         )
 
 
+class ScriptInjector:
+
+    def __init__(self):
+        ...
+
+
+class StartupSymLinkModifier:
+
+    def __init__(self):
+        ...
+
+
 class ExtractedFirmwareBundler:
-    
+
     def __init__(self, firmware_path: Path, extractor: FirmwareExtractor) -> None:
         assert firmware_path.is_file(), f"{firmware_path} is not a file!"
         assert extractor.storage_model.base_dir.is_dir(), f"{extractor.storage_model.base_dir} is not a dir!"
@@ -254,8 +266,8 @@ class ExtractedFirmwareBundler:
         self.copy_extracted_dir(dry_run=dry_run)
         # remove the rootfs files since we need to "compile" those
         self.remove_rootfs_files(dry_run=dry_run)
-    
-        # convert the extracted file system to the singular rootfs file  
+
+        # convert the extracted file system to the singular rootfs file
         rootfs_path = self.storage_model.rootfs_path
         RootFsUtils.convert_file_system_to_file(
             file_system_dir=self.extractor.storage_model.extracted_rootfs_path,
@@ -264,7 +276,7 @@ class ExtractedFirmwareBundler:
         )
         print(RootFsUtils.get_file_info(rootfs_path, dry_run=dry_run))
         # print(RootFsUtils.get_fs_xattrs(rootfs_path, dry_run=False))
-        
+
         # convert the rootfs file to chunks
         RootFsUtils.convert_file_to_chunks(
             path=rootfs_path,
@@ -288,6 +300,78 @@ class ExtractedFirmwareBundler:
             dry_run=dry_run,
         )
 
+class ScriptInjector:
+
+    @staticmethod
+    def _strip_leading_slash(p: str) -> str:
+        return p[1:] if p.startswith('/') else p
+
+    @classmethod
+    def install_all(cls, scripts_dir: Path, rootfs_dir: Path, device_scripts_dir: str, dry_run: bool=False) -> list[Path]:
+        """
+        Copy all files from scripts_dir into device_scripts_dir inside rootfs_dir.
+        Ensures destination directories exist and files are chmod 0755.
+
+        Returns list of installed paths (inside rootfs).
+        """
+        installed: list[Path] = []
+        dest_dir_rel = Path(cls._strip_leading_slash(device_scripts_dir))
+        for p in scripts_dir.iterdir():
+            if not p.is_file():
+                continue
+            dest = rootfs_dir / dest_dir_rel / p.name
+            run_command(f"sudo install -D -m 0755 {p} {dest}", dry_run=dry_run)
+            run_command(f"sudo chmod 0755 {dest}", dry_run=dry_run)
+            installed.append(dest)
+        return installed
+
+
+class StartupSymLinkModifier:
+
+    @staticmethod
+    def _strip_leading_slash(p: str) -> str:
+        return p[1:] if p.startswith('/') else p
+
+    @classmethod
+    def create_symlinks(
+        cls,
+        rootfs_dir: Path,
+        device_scripts_dir: str,
+        priority: int = 90,
+        prefix: str = "MIBY",
+        dry_run: bool = False,
+    ) -> list[Path]:
+        """
+        Create init.d symlinks pointing to scripts under device_scripts_dir.
+        Link name pattern: S{priority}_<prefix>_<scriptname>
+        """
+        links: list[Path] = []
+        initd = rootfs_dir / "etc/init.d"
+        run_command(f"sudo install -d -m 0755 {initd}", dry_run=dry_run)
+
+        src_dir_rel = Path(cls._strip_leading_slash(device_scripts_dir))
+        src_dir_abs = rootfs_dir / src_dir_rel
+        for p in src_dir_abs.iterdir():
+            if not p.is_file():
+                continue
+            # Only create init.d symlinks for script-like files (shebang)
+            is_script = False
+            try:
+                with p.open('rb') as fh:
+                    head = fh.read(2)
+                    is_script = head == b"#!"
+            except Exception:
+                is_script = False
+            if not is_script:
+                continue
+            name = p.name
+            link_name = f"S{priority:02d}_{prefix}_{name}"
+            link_path = initd / link_name
+            target_abs = f"/{src_dir_rel}/{name}"  # absolute path as seen on device
+            run_command(f"sudo ln -sf {target_abs} {link_path}", dry_run=dry_run)
+            links.append(link_path)
+        return links
+
 
 def main():
     extractor = FirmwareExtractor(
@@ -295,11 +379,21 @@ def main():
     )
     extractor.run(dry_run=False)
     print(RootFsUtils.get_file_info(extractor.storage_model.rootfs_path, dry_run=False))
-    # print(RootFsUtils.get_fs_xattrs(extractor.storage_model.rootfs_path, dry_run=False))
 
-    run_command(
-        f"bash scripts/add-adb-init.sh firmware/r3proii.upt_extracted/ota_v0/rootfs.squashfs_extracted",
-        dry_run=False
+    # Install all scripts under ./scripts into the device and link them into init.d
+    device_scripts_dir = "/usr/bin/miby"
+    ScriptInjector.install_all(
+        scripts_dir=Path("scripts"),
+        rootfs_dir=extractor.storage_model.extracted_rootfs_path,
+        device_scripts_dir=device_scripts_dir,
+        dry_run=False,
+    )
+    StartupSymLinkModifier.create_symlinks(
+        rootfs_dir=extractor.storage_model.extracted_rootfs_path,
+        device_scripts_dir=device_scripts_dir,
+        priority=90,
+        prefix="MIBY",
+        dry_run=False,
     )
 
     bundler = ExtractedFirmwareBundler(

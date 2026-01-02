@@ -1,3 +1,6 @@
 #!/usr/bin/env bash
-rm -rf "$(dirname "$0")/build-pc"
-rm -rf "$(dirname "$0")/build-device"
+set -e
+UI_DIR="$(cd "$(dirname "$0")" && pwd)"
+rm -rf "$UI_DIR"/build-pc "$UI_DIR"/build-device || true
+rm -rf "$UI_DIR"/build-pc-* "$UI_DIR"/build-device-* || true
+echo "Cleaned UI build directories."

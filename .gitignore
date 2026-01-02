@@ -7,6 +7,6 @@ tools/
 r3proii.upt
 
 ui/build-pc
-ui/build-device
+ui/build-device*
 
 music

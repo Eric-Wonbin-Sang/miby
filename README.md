@@ -30,6 +30,12 @@ I like tech and retro-things, and I eventually started seeing posts about people
 > I wish you guys the best of luck, this shit feels so annoying to deal with and
 > I'm assuming you guys actually know what you're doing.
 
+I just realized that the work was done a couple months ago, but the project is on hold now.
+
+https://git.rockbox.org/cgit/rockbox.git/commit/?id=1183b1ab1b1166c986ce72e47942b75172cd96d7
+https://codeberg.org/oopsallnaps/rockbox-hibyos
+https://codeberg.org/oopsallnaps/rockbox-hibyos/issues/18
+
 ## Criteria
 
 I liked the idea of the click wheel or some type of knob, but my main things were:
@@ -113,6 +119,15 @@ drwxr-xr-x  2 root root 4096 Aug 30 05:49 adb/
 # Modifying Firmware
 
 There is a process that the original developers use for turning on ADB functionality, but they disable it before they sell them.
+
+The scripts dir is where I put the scripts that I want added into the rootfs before bundling. The 
+
+adb push /home/sang/local_coding_projects/miby/r3proii.upt ./
+adb shell "ls -la /usr/data/mnt/sd_0/"
+/data/mnt/sd_0
+
+adb push r3proii.upt /usr/data/mnt/sd_0
+adb shell "ls -la /usr/data/mnt/sd_0"
 
 # Bundling Firmware
 
@@ -213,17 +228,17 @@ Times like these make me question our reality.
 
 # Put these somewhere
 
-# sudo pacman -S binwalk
-# sudo rm -rf firmware/r3proii.upt_bundle firmware/r3proii.upt_extracted
+sudo pacman -S binwalk
+sudo rm -rf firmware/r3proii.upt_bundle firmware/r3proii.upt_extracted
 
-# Analyze the rootfs
+Analyze the rootfs
 
 ```bash
 # 3) confirm init system + list boot scripts in order
 
 ```
 
-# Search for how the stock UI starts:
+Search for how the stock UI starts:
 
 ```bash
 cd rootfs_extracted

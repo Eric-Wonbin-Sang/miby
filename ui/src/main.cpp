@@ -1,10 +1,13 @@
 //
-// Simple directory tree viewer with scrolling.
+// Simple LVGL app launcher shell with a scrollable home screen.
+// Includes a File Explorer demo app with a back button.
 // - PC: uses SDL window/input
 // - Device: uses Linux FBDEV
 //
 
 #include "lvgl.h"
+#include "pages/file_explorer.h"
+#include "pages/mesh_demo.h"
 
 #include <unistd.h>
 #include <dirent.h>
@@ -25,6 +28,7 @@
 #include "drivers/sdl/lv_sdl_keyboard.h"
 #elif defined(UI_PLATFORM_FBDEV)
 #include "drivers/display/fb/lv_linux_fbdev.h"
+#include "drivers/evdev/lv_evdev.h"
 #endif
 
 static void tick_cb(lv_timer_t*) { lv_tick_inc(5); }
@@ -94,150 +98,216 @@ static void walk_dir(TreeCtx& ctx, const std::string& root, int depth) {
 
 static void clear_children(lv_obj_t* parent) { lv_obj_clean(parent); }
 
-struct UiRefs {
-    lv_obj_t* ta_path;
-    lv_obj_t* list;
+// Removed page-specific logic; moved to pages/file_explorer.{h,cpp}
+
+// --- App framework: home screen + app pages ---
+
+struct AppCtx {
+    lv_obj_t* root{};      // active screen root
+    lv_obj_t* home{};      // home page container (scrollable list of buttons)
+    lv_obj_t* app_page{};  // current app page (with back header)
+    int argc{};
+    char** argv{};
 };
 
-static void rebuild_tree(UiRefs* ui, const char* path) {
-    clear_children(ui->list);
-    const char* md = getenv("UI_MAX_DEPTH");
-    int max_depth = md ? atoi_default(md, 0) : 3; // default to 3 to avoid OOM
-    TreeCtx ctx{ui->list, max_depth};
-    // Root title
-    {
-        std::string title = std::string("Root: ") + path;
-        lv_list_add_text(ui->list, title.c_str());
+static void show_home(AppCtx* app) {
+    if (!app) return;
+    if (app->app_page) {
+        lv_obj_delete(app->app_page);
+        app->app_page = nullptr;
     }
-    walk_dir(ctx, path, 1);
-}
-
-static void btn_go_event(lv_event_t* e) {
-    UiRefs* ui = static_cast<UiRefs*>(lv_event_get_user_data(e));
-    const char* p = lv_textarea_get_text(ui->ta_path);
-    rebuild_tree(ui, p);
-}
-
-static void btn_up_event(lv_event_t* e) {
-    UiRefs* ui = static_cast<UiRefs*>(lv_event_get_user_data(e));
-    std::string p = lv_textarea_get_text(ui->ta_path);
-    // remove trailing slash (except root)
-    while (p.size() > 1 && p.back() == '/') p.pop_back();
-    size_t pos = p.find_last_of('/');
-    if (pos == std::string::npos) p = "/";
-    else if (pos == 0) p = "/";
-    else p.erase(pos);
-    lv_textarea_set_text(ui->ta_path, p.c_str());
-    rebuild_tree(ui, p.c_str());
-}
-
-static void btn_pc_event(lv_event_t* e) {
-    UiRefs* ui = static_cast<UiRefs*>(lv_event_get_user_data(e));
-    char buf[PATH_MAX] = {0};
-    if (getcwd(buf, sizeof(buf) - 1) == nullptr) strncpy(buf, "/", sizeof(buf) - 1);
-    lv_textarea_set_text(ui->ta_path, buf);
-    rebuild_tree(ui, buf);
-}
-
-static void btn_dev_event(lv_event_t* e) {
-    UiRefs* ui = static_cast<UiRefs*>(lv_event_get_user_data(e));
-    const char* def = getenv("UI_DEVICE_PATH");
-    if (!def || !*def) def = "/";
-    lv_textarea_set_text(ui->ta_path, def);
-    rebuild_tree(ui, def);
-}
-
-static std::string initial_path_from_args(int argc, char** argv) {
-    // 1) --path=...
-    for (int i = 1; i < argc; ++i) {
-        const char* a = argv[i];
-        static const char* k = "--path=";
-        if (strncmp(a, k, strlen(k)) == 0) return std::string(a + strlen(k));
+    if (app->home) {
+        lv_obj_clear_flag(app->home, LV_OBJ_FLAG_HIDDEN);
     }
-    // 2) UI_START_PATH env
-    const char* envp = getenv("UI_START_PATH");
-    if (envp && *envp) return std::string(envp);
-    // 3) CWD
-    char buf[PATH_MAX] = {0};
-    if (getcwd(buf, sizeof(buf) - 1)) return std::string(buf);
-    return "/";
+}
+
+// Create a page wrapper with a top header containing a back button and title.
+// Returns the page container to place content into (content area below header).
+static lv_obj_t* create_app_page_with_back(AppCtx* app, const char* title_text,
+        lv_event_cb_t back_cb, void* back_user_data)
+{
+    lv_obj_t* page = lv_obj_create(app->root);
+    lv_obj_remove_style_all(page);
+
+    // Let flex size it; or keep 100% if you want, but grow is usually cleaner in a flex column root.
+    lv_obj_set_size(page, LV_PCT(100), LV_PCT(100));
+    lv_obj_set_flex_flow(page, LV_FLEX_FLOW_COLUMN);
+
+    lv_obj_set_style_pad_all(page, 0, 0);
+    lv_obj_set_style_pad_row(page, 0, 0);
+
+    // Header row
+    lv_obj_t* hdr = lv_obj_create(page);
+    lv_obj_remove_style_all(hdr);
+    lv_obj_set_flex_flow(hdr, LV_FLEX_FLOW_ROW);
+    lv_obj_set_width(hdr, LV_PCT(100));
+
+    // *** IMPORTANT: make header shrink to its content ***
+    lv_obj_set_height(hdr, LV_SIZE_CONTENT);
+
+    // optional: give the header its own padding so it looks like a bar
+    lv_obj_set_style_pad_left(hdr, 6, 0);
+    lv_obj_set_style_pad_right(hdr, 6, 0);
+    lv_obj_set_style_pad_top(hdr, 6, 0);
+    lv_obj_set_style_pad_bottom(hdr, 6, 0);
+    lv_obj_set_style_pad_column(hdr, 8, 0);
+
+    lv_obj_t* btn_back = lv_button_create(hdr);
+    lv_obj_remove_style_all(btn_back);
+    lv_obj_set_size(btn_back, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
+    lv_obj_add_event_cb(btn_back, back_cb, LV_EVENT_CLICKED, back_user_data);
+
+    lv_obj_t* back_lbl = lv_label_create(btn_back);
+    lv_label_set_text(back_lbl, LV_SYMBOL_LEFT " Back");
+    lv_obj_center(back_lbl);
+
+    lv_obj_t* title = lv_label_create(hdr);
+    lv_label_set_text(title, title_text ? title_text : "");
+
+    // Content area
+    lv_obj_t* content = lv_obj_create(page);
+    lv_obj_remove_style_all(content);
+
+    lv_obj_set_width(content, LV_PCT(100));
+    // *** IMPORTANT: do NOT set height=100% in a flex column with a header ***
+    // lv_obj_set_height(content, LV_PCT(100));  // remove this
+
+    lv_obj_set_flex_grow(content, 1);
+    lv_obj_set_flex_flow(content, LV_FLEX_FLOW_COLUMN);
+
+    lv_obj_set_style_pad_all(content, 0, 0);
+    lv_obj_set_style_pad_row(content, 0, 0);
+
+    // If you don't need scrolling for the mesh demo, disable it (prevents odd offsets)
+    lv_obj_set_scroll_dir(content, LV_DIR_NONE);
+
+    return content;
+}
+
+
+// Build the File Explorer app into a new page and show it; adds a back button.
+static void launch_file_explorer(AppCtx* app) {
+    if (!app) return;
+    if (app->home) lv_obj_add_flag(app->home, LV_OBJ_FLAG_HIDDEN);
+
+    // Back callback closes the page and shows home
+    struct BackCtx { AppCtx* app; pages::FileExplorerCtx* fx; };
+    auto back_cb = [](lv_event_t* e) {
+        BackCtx* b = static_cast<BackCtx*>(lv_event_get_user_data(e));
+        if (!b) return;
+        AppCtx* app = b->app;
+        // Clean up page-specific resources (our ctx only, LVGL objects deleted with page)
+        if (b->fx) { pages::destroy_file_explorer(b->fx); b->fx = nullptr; }
+        // Show home first
+        show_home(app);
+        // Then delete the page; use delayed delete to be safe inside event context
+        if (app && app->app_page) {
+            lv_obj_t* page = app->app_page;
+            app->app_page = nullptr;
+            lv_obj_delete_delayed(page, 0);
+        }
+        delete b;
+    };
+
+    BackCtx* bctx = new BackCtx{app, nullptr};
+    lv_obj_t* content = create_app_page_with_back(app, "File Explorer", back_cb, bctx);
+    app->app_page = lv_obj_get_parent(content); // top-level page
+
+    // Build explorer UI into content
+    bctx->fx = pages::create_file_explorer(content, app->argc, app->argv);
+}
+
+// Create the Home screen: a scrollable list of app buttons
+static void build_home(AppCtx* app) {
+    if (!app) return;
+    lv_obj_t* home = lv_list_create(app->root);
+    lv_obj_set_size(home, LV_PCT(100), LV_PCT(100));
+    lv_obj_set_flex_grow(home, 1);
+
+    // Title text
+    lv_list_add_text(home, "Apps");
+
+    // File Explorer launcher button
+    lv_obj_t* btn = lv_list_add_button(home, LV_SYMBOL_DIRECTORY, "File Explorer");
+    lv_obj_add_event_cb(btn, [](lv_event_t* e){
+        AppCtx* app = static_cast<AppCtx*>(lv_event_get_user_data(e));
+        launch_file_explorer(app);
+    }, LV_EVENT_CLICKED, app);
+
+    // 3D Mesh Demo launcher button
+    lv_obj_t* btn2 = lv_list_add_button(home, LV_SYMBOL_SHUFFLE, "3D Mesh Demo");
+    lv_obj_add_event_cb(btn2, [](lv_event_t* e){
+        AppCtx* app = static_cast<AppCtx*>(lv_event_get_user_data(e));
+        // Hide home
+        if (app->home) lv_obj_add_flag(app->home, LV_OBJ_FLAG_HIDDEN);
+        // Back handler
+        struct BackCtx { AppCtx* app; pages::MeshDemoCtx* md; };
+        auto back_cb = [](lv_event_t* e){
+            BackCtx* b = static_cast<BackCtx*>(lv_event_get_user_data(e));
+            if (!b) return;
+            AppCtx* app = b->app;
+            if (b->md) { pages::destroy_mesh_demo(b->md); b->md = nullptr; }
+            show_home(app);
+            if (app && app->app_page) { lv_obj_t* page = app->app_page; app->app_page = nullptr; lv_obj_delete_delayed(page, 0); }
+            delete b;
+        };
+        BackCtx* bctx = new BackCtx{app, nullptr};
+        lv_obj_t* content = create_app_page_with_back(app, "3D Mesh", back_cb, bctx);
+        app->app_page = lv_obj_get_parent(content);
+        bctx->md = pages::create_mesh_demo(content);
+    }, LV_EVENT_CLICKED, app);
+
+    app->home = home;
 }
 
 int main(int argc, char** argv) {
     lv_init();
+    fprintf(stderr, "[ui] lv_init done\n"); fflush(stderr);
 
     // Display + input
     lv_display_t* disp = nullptr;
 #if defined(UI_PLATFORM_SDL)
+    // SDL simulator (PC)
     disp = lv_sdl_window_create(480, 720);
     (void)lv_sdl_mouse_create();
     (void)lv_sdl_keyboard_create();
+
 #elif defined(UI_PLATFORM_FBDEV)
+    // Linux framebuffer (device)
     disp = lv_linux_fbdev_create();
     const char* fb = getenv("FBDEV");
     if (fb && *fb) lv_linux_fbdev_set_file(disp, fb);
+
+    // Optional input via evdev (e.g., touch)
+    const char* ev = getenv("EVDEV");
+    if (!ev || !*ev) ev = "/dev/input/event0";
+    (void)lv_evdev_create(LV_INDEV_TYPE_POINTER, ev);
+
 #else
-    // Default to SDL if nothing specified
-    disp = lv_sdl_window_create(480, 720);
-    (void)lv_sdl_mouse_create();
-    (void)lv_sdl_keyboard_create();
+#   error "No platform selected. Enable UI_PLATFORM_SDL or UI_PLATFORM_FBDEV"
 #endif
+    if(!disp) {
+        fprintf(stderr, "Failed to create LVGL display\n");
+        return 1;
+    }
     (void)disp;
+    fprintf(stderr, "[ui] display + input ready\n"); fflush(stderr);
 
     // Root layout: column
     lv_obj_t* root = lv_screen_active();
     lv_obj_set_flex_flow(root, LV_FLEX_FLOW_COLUMN);
-    lv_obj_set_style_pad_all(root, 8, 0);
-    lv_obj_set_style_pad_row(root, 6, 0);
+    lv_obj_set_style_pad_all(root, 0, 0);
+    lv_obj_set_style_pad_row(root, 0, 0);
 
-    // Header row: Path input + buttons
-    UiRefs ui{};
-    lv_obj_t* hdr = lv_obj_create(root);
-    lv_obj_remove_style_all(hdr);
-    lv_obj_set_flex_flow(hdr, LV_FLEX_FLOW_ROW);
-    lv_obj_set_style_pad_column(hdr, 6, 0);
-    lv_obj_set_width(hdr, LV_PCT(100));
+    // App context
+    AppCtx app{};
+    app.root = root;
+    app.argc = argc;
+    app.argv = argv;
 
-    lv_obj_t* lbl = lv_label_create(hdr);
-    lv_label_set_text(lbl, "Path:");
-
-    ui.ta_path = lv_textarea_create(hdr);
-    lv_textarea_set_one_line(ui.ta_path, true);
-    lv_obj_set_flex_grow(ui.ta_path, 1);
-    std::string init_path = initial_path_from_args(argc, argv);
-    lv_textarea_set_text(ui.ta_path, init_path.c_str());
-
-    lv_obj_t* btn_go = lv_button_create(hdr);
-    lv_obj_t* btn_go_lbl = lv_label_create(btn_go);
-    lv_label_set_text(btn_go_lbl, "Go");
-    lv_obj_center(btn_go_lbl);
-    lv_obj_add_event_cb(btn_go, btn_go_event, LV_EVENT_CLICKED, &ui);
-
-    lv_obj_t* btn_up = lv_button_create(hdr);
-    lv_obj_t* btn_up_lbl = lv_label_create(btn_up);
-    lv_label_set_text(btn_up_lbl, "Up");
-    lv_obj_center(btn_up_lbl);
-    lv_obj_add_event_cb(btn_up, btn_up_event, LV_EVENT_CLICKED, &ui);
-
-    lv_obj_t* btn_pc = lv_button_create(hdr);
-    lv_obj_t* btn_pc_lbl = lv_label_create(btn_pc);
-    lv_label_set_text(btn_pc_lbl, "PC");
-    lv_obj_center(btn_pc_lbl);
-    lv_obj_add_event_cb(btn_pc, btn_pc_event, LV_EVENT_CLICKED, &ui);
-
-    lv_obj_t* btn_dev = lv_button_create(hdr);
-    lv_obj_t* btn_dev_lbl = lv_label_create(btn_dev);
-    lv_label_set_text(btn_dev_lbl, "Device");
-    lv_obj_center(btn_dev_lbl);
-    lv_obj_add_event_cb(btn_dev, btn_dev_event, LV_EVENT_CLICKED, &ui);
-
-    // List container (scrollable)
-    ui.list = lv_list_create(root);
-    lv_obj_set_size(ui.list, LV_PCT(100), LV_PCT(100));
-    lv_obj_set_flex_grow(ui.list, 1);
-
-    // Build initial tree
-    rebuild_tree(&ui, init_path.c_str());
+    // Build and show home
+    build_home(&app);
+    fprintf(stderr, "[ui] home built\n"); fflush(stderr);
 
     // LVGL tick + loop
     lv_timer_create(tick_cb, 5, nullptr);

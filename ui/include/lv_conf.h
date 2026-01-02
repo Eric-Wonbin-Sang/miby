@@ -28,6 +28,8 @@
 
 #if defined(UI_PLATFORM_FBDEV)
 #  define LV_USE_LINUX_FBDEV 1
+#  define LV_USE_EVDEV 1
 #else
 #  define LV_USE_LINUX_FBDEV 0
+#  define LV_USE_EVDEV 0
 #endif
