@@ -1,12 +1,16 @@
-# Ignore extracted firmware contents but keep directory docs
-firmware/**
-!firmware/
-!firmware/**/README.md
+# Ignore firmware sources
+firmware/sources/
 
-tools/
-r3proii.upt
+# Ignore build artifacts and working directories
+work/
+output/
 
-ui/build-pc
-ui/build-device*
+# Ignore built overlays but keep the overlays directory
+overlays/dropbear/
+overlays/adb/
 
-music
+# Ignore scripts derived from overlay creations
+scripts/
+
+# Ignore music directory
+music/

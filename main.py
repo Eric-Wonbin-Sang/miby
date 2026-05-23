@@ -225,18 +225,6 @@ class FirmwareExtractor:
         )
 
 
-class ScriptInjector:
-
-    def __init__(self):
-        ...
-
-
-class StartupSymLinkModifier:
-
-    def __init__(self):
-        ...
-
-
 class ExtractedFirmwareBundler:
 
     def __init__(self, firmware_path: Path, extractor: FirmwareExtractor) -> None:

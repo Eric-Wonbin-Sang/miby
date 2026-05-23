@@ -138,6 +138,46 @@ We more or less do the reverse of extracting the firmware:
 - update the metadata in ota_update.in to match the new MD5 data
 - compress files back into a upt ISO file
 
+## CLI Usage
+
+The repository provides a CLI entrypoint at `tools/miby_build.py`.
+
+### Global options
+
+- `--root <path>`: repository root directory (defaults to current working directory)
+- `--dry-run`: show actions without executing them
+- `--status`: print the current project status and exit
+
+### Commands
+
+- `status`: show current project and Dropbear build status
+- `extract <firmware_name> [--force]`: extract a source `.upt`, join rootfs chunks, and unpack the rootfs
+- `dropbear-build [--force] [--redownload-source]`: download and build Dropbear for `mipsel`
+- `dropbear-overlay [--public-key <path>] [--auto-start|--manual-start] [--show-indicator|--no-show-indicator] [--port <port>]`: create a Dropbear overlay package
+- `inject-overlay <firmware_name> <overlay> [--force]`: apply an overlay into an extracted firmware rootfs
+- `inject-dropbear <firmware_name> [--public-key <path>] [--auto-start|--manual-start] [--show-indicator|--no-show-indicator] [--port <port>] [--force]`: build Dropbear, create the overlay, and inject it
+- `adb-overlay`: create an ADB overlay
+- `adb-inject <firmware_name> [--force]`: create and inject the ADB overlay
+- `pack <firmware_name> [--output <name>] [--force]`: package modified firmware into a new `.upt`
+- `full <firmware_name> [--dropbear] [--adb] [--public-key <path>] [--output <name>] [--force]`: run extract, optional overlays, and pack
+
+### Example usage
+
+```bash
+python3 tools/miby_build.py --status
+python3 tools/miby_build.py status
+python3 tools/miby_build.py extract r3proii.upt --force
+python3 tools/miby_build.py dropbear-build --force
+python3 tools/miby_build.py dropbear-overlay --public-key /path/to/key.pub --port 2222
+python3 tools/miby_build.py adb-overlay
+python3 tools/miby_build.py inject-dropbear r3proii.upt --force
+python3 tools/miby_build.py inject-adb r3proii.upt --force
+python3 tools/miby_build.py pack r3proii.upt --output r3proii_miby.upt
+python3 tools/miby_build.py full r3proii.upt --dropbear --output r3proii_dropbear_miby.upt
+python3 tools/miby_build.py full r3proii.upt --adb --output r3proii_adb_miby.upt
+python3 tools/miby_build.py full r3proii.upt --dropbear --adb --output r3proii_full_miby.upt
+```
+
 # Flashing Firmware
 
 ## Dependencies
@@ -181,7 +221,14 @@ adb pull /usr/data/mnt/sd_0/file /my/new/pit/
 Do you need this?
 https://developer.android.com/studio/run/win-usb
 
-# Interesting...
+# Enabling SSH
+
+2026.05.22
+
+The device can connect to wifi. I want to enable ssh so I can interact with it without a cable. 
+
+
+# Music Discovery
 
 We can finally stop using those sites:
 
@@ -192,6 +239,60 @@ yt-dlp.exe -f ba https://www.youtube.com/watch?v=8SZIvzdxcnE
 # metadata + thumbnail embedded (artist is annoying)
 yt-dlp.exe -f ba --extract-audio --audio-format flac --embed-metadata --embed-thumbnail <YOUTUBE_URL>
 ```
+
+---
+
+# New Build System Layout
+
+This repository now includes a small reusable firmware build system under `tools/miby_core`.
+
+- `firmware/sources/` holds all source `.upt` firmware files.
+- `work/` holds extracted firmware workspaces and tool artifacts.
+- `overlays/` contains filesystem overlays that map host paths into the extracted rootfs.
+- `output/` is where custom firmware packages are written.
+- `tools/miby_build.py` is the CLI entrypoint.
+- `tools/miby_core/` contains the reusable build logic.
+
+The CLI supports these workflows:
+
+- `status` — inspect available firmware, workspaces, and dropbear build state.
+- `extract <firmware>` — extract a `.upt`, join rootfs chunks, and unpack the SquashFS rootfs.
+- `dropbear-build` — download and build the mipsel Dropbear toolchain.
+- `dropbear-overlay` — create an overlay that installs Dropbear and startup scripts.
+- `inject-overlay <firmware> <overlay>` — apply an overlay into the extracted rootfs.
+- `inject-dropbear <firmware>` — build Dropbear, create the overlay, and inject it.
+- `pack <firmware>` — rebuild a custom `.upt` from the modified workspace.
+- `full <firmware>` — run extract, optional Dropbear injection, and pack in one command.
+
+## Directory layout for custom firmware
+
+```
+firmware/
+  sources/
+    r3proii.upt
+work/
+  tools/
+    dropbear/
+  r3proii.upt_extracted/
+  r3proii.upt_bundle/
+overlays/
+  dropbear/
+output/
+tools/
+  miby_build.py
+  miby_core/
+    __init__.py
+    context.py
+    command.py
+    status.py
+    firmware.py
+    rootfs.py
+    overlay.py
+    dropbear.py
+    cli.py
+```
+
+This structure keeps multiple firmware versions independent, and lets the UI call the same build logic later.
 
 ---
 
