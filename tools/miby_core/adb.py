@@ -27,9 +27,12 @@ def create_adb_overlay(ctx) -> StepResult:
     # Create a simple script to enable ADB at startup
     adb_init_script = etc_init / "S91adb_enable"
     adb_script_content = """#!/bin/sh
-# Enable ADB daemon
-setprop persist.sys.usb.config adb
-/system/bin/adbd &
+# Enable ADB daemon and log diagnostics
+mkdir -p /usr/data/adb
+echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) [adb] enable requested" >> /usr/data/adb/adb.log 2>/dev/null || true
+setprop persist.sys.usb.config adb >/dev/null 2>&1 || echo "setprop failed" >> /usr/data/adb/adb.log 2>/dev/null || true
+/system/bin/adbd >> /usr/data/adb/adb.log 2>&1 &
+echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) [adb] started" >> /usr/data/adb/adb.log 2>/dev/null || true
 exit 0
 """
     if not ctx.dry_run:
