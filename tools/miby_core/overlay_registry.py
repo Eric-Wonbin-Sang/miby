@@ -14,7 +14,7 @@ def discover_overlay_names(ctx) -> List[str]:
     root = _overlays_root(ctx)
     if not root.exists():
         return []
-    return [p.name for p in root.iterdir() if p.is_dir()]
+    return sorted([p.name for p in root.iterdir() if p.is_dir() and (p / "overlay.py").is_file()])
 
 
 def _load_module_from_path(path: Path):

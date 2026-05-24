@@ -114,12 +114,31 @@ def main(argv: List[str] = None) -> int:
     overlay_build_parser.add_argument("names", nargs="*", help="Overlay names to build")
     overlay_build_parser.add_argument("--all", action="store_true")
     overlay_build_parser.add_argument("--public-key", type=str, default=None)
+    overlay_build_parser.add_argument("--port", type=int, default=2222)
+    overlay_build_auto_group = overlay_build_parser.add_mutually_exclusive_group()
+    overlay_build_auto_group.add_argument("--auto-start", dest="auto_start", action="store_true")
+    overlay_build_auto_group.add_argument("--manual-start", dest="auto_start", action="store_false")
+    overlay_build_parser.set_defaults(auto_start=True)
+    overlay_build_indicator_group = overlay_build_parser.add_mutually_exclusive_group()
+    overlay_build_indicator_group.add_argument("--show-indicator", dest="show_indicator", action="store_true")
+    overlay_build_indicator_group.add_argument("--no-show-indicator", dest="show_indicator", action="store_false")
+    overlay_build_parser.set_defaults(show_indicator=True)
 
     inject_overlays_parser = subparsers.add_parser("inject-overlays", help="Inject multiple overlays into firmware")
     inject_overlays_parser.add_argument("firmware_name")
     inject_overlays_parser.add_argument("names", nargs="*", help="Overlay names to inject")
     inject_overlays_parser.add_argument("--all", action="store_true")
     inject_overlays_parser.add_argument("--force", action="store_true")
+    inject_overlays_parser.add_argument("--public-key", type=str, default=None)
+    inject_overlays_parser.add_argument("--port", type=int, default=2222)
+    inject_overlays_auto_group = inject_overlays_parser.add_mutually_exclusive_group()
+    inject_overlays_auto_group.add_argument("--auto-start", dest="auto_start", action="store_true")
+    inject_overlays_auto_group.add_argument("--manual-start", dest="auto_start", action="store_false")
+    inject_overlays_parser.set_defaults(auto_start=True)
+    inject_overlays_indicator_group = inject_overlays_parser.add_mutually_exclusive_group()
+    inject_overlays_indicator_group.add_argument("--show-indicator", dest="show_indicator", action="store_true")
+    inject_overlays_indicator_group.add_argument("--no-show-indicator", dest="show_indicator", action="store_false")
+    inject_overlays_parser.set_defaults(show_indicator=True)
 
     adb_inject_parser = subparsers.add_parser("adb-inject", help="Create and inject adb overlay")
     adb_inject_parser.add_argument("firmware_name")
@@ -130,11 +149,23 @@ def main(argv: List[str] = None) -> int:
     pack_parser.add_argument("--output", type=str, default=None)
     pack_parser.add_argument("--force", action="store_true")
 
-    full_parser = subparsers.add_parser("full", help="Run extract, optional dropbear/adb injection, and pack")
+    full_parser = subparsers.add_parser("full", help="Run extract, optional overlay injection, and pack")
     full_parser.add_argument("firmware_name")
-    full_parser.add_argument("--dropbear", action="store_true")
-    full_parser.add_argument("--adb", action="store_true")
+    full_parser.add_argument("--overlay", action="append", default=[], help="Overlay name to build and inject; can be used multiple times")
+    full_parser.add_argument("--overlays", nargs="+", default=[], help="Overlay names to build and inject")
+    full_parser.add_argument("--all-overlays", action="store_true", help="Build and inject all discovered overlays")
+    full_parser.add_argument("--dropbear", action="store_true", help="(legacy) Include dropbear overlay")
+    full_parser.add_argument("--adb", action="store_true", help="(legacy) Include adb overlay")
     full_parser.add_argument("--public-key", type=str, default=None)
+    full_parser.add_argument("--port", type=int, default=2222)
+    full_auto_group = full_parser.add_mutually_exclusive_group()
+    full_auto_group.add_argument("--auto-start", dest="auto_start", action="store_true")
+    full_auto_group.add_argument("--manual-start", dest="auto_start", action="store_false")
+    full_parser.set_defaults(auto_start=True)
+    full_indicator_group = full_parser.add_mutually_exclusive_group()
+    full_indicator_group.add_argument("--show-indicator", dest="show_indicator", action="store_true")
+    full_indicator_group.add_argument("--no-show-indicator", dest="show_indicator", action="store_false")
+    full_parser.set_defaults(show_indicator=True)
     full_parser.add_argument("--force", action="store_true")
     full_parser.add_argument("--output", type=str, default=None)
 
@@ -188,10 +219,16 @@ def main(argv: List[str] = None) -> int:
 
     if args.command == "overlay-build":
         names = args.names or []
+        overlay_kwargs = {
+            "public_key": args.public_key,
+            "port": args.port,
+            "auto_start": args.auto_start,
+            "show_indicator": args.show_indicator,
+        }
         if args.all:
-            results = overlays_registry.build_all_overlays(ctx, public_key=args.public_key)
+            results = overlays_registry.build_all_overlays(ctx, **overlay_kwargs)
         else:
-            results = overlays_registry.build_overlays(ctx, names, public_key=args.public_key)
+            results = overlays_registry.build_overlays(ctx, names, **overlay_kwargs)
         _print_step_results(results)
         return 1 if _any_failure(results) else 0
 
@@ -200,8 +237,15 @@ def main(argv: List[str] = None) -> int:
         if args.all:
             names = overlays_registry.discover_overlay_names(ctx)
         results = []
-        # Ensure overlays built
-        build_results = overlays_registry.build_overlays(ctx, names)
+        # Prepare shared overlay kwargs
+        overlay_kwargs = {
+            "public_key": args.public_key,
+            "port": args.port,
+            "auto_start": args.auto_start,
+            "show_indicator": args.show_indicator,
+        }
+        # Ensure overlays built with shared kwargs
+        build_results = overlays_registry.build_overlays(ctx, names, **overlay_kwargs)
         results.extend(build_results)
         if _any_failure(build_results):
             _print_step_results(results)
@@ -253,22 +297,50 @@ def main(argv: List[str] = None) -> int:
         if _any_failure(extract_results):
             _print_step_results(results)
             return 1
-        # support legacy flags
-        overlays_to_inject = []
+
+        # Collect overlay names from all sources
+        overlay_names = []
+
+        # Support --all-overlays
+        if args.all_overlays:
+            overlay_names.extend(overlays_registry.discover_overlay_names(ctx))
+
+        # Support legacy --dropbear and --adb flags
         if args.dropbear:
-            overlays_to_inject.append("dropbear")
+            overlay_names.append("dropbear")
         if args.adb:
-            overlays_to_inject.append("adb")
-        # additional overlays via env var or future flags can be added
-        for ov in overlays_to_inject:
-            # build then inject
-            overlays_registry.build_overlay(ctx, ov, public_key=args.public_key)
-            r = overlay.inject_overlay(ctx, args.firmware_name, ov, force=args.force)
-            results.append(r)
-            if not r.ok:
+            overlay_names.append("adb")
+
+        # Support new --overlay (repeated) and --overlays (space-separated) flags
+        overlay_names.extend(args.overlay or [])
+        overlay_names.extend(args.overlays or [])
+
+        # De-duplicate while preserving order
+        overlay_names = list(dict.fromkeys(overlay_names))
+
+        # Prepare shared overlay kwargs
+        overlay_kwargs = {
+            "public_key": args.public_key,
+            "port": args.port,
+            "auto_start": args.auto_start,
+            "show_indicator": args.show_indicator,
+        }
+
+        # Build and inject each overlay
+        for ov in overlay_names:
+            build_result = overlays_registry.build_overlay(ctx, ov, **overlay_kwargs)
+            results.append(build_result)
+            if not build_result.ok:
                 _print_step_results(results)
                 return 1
 
+            inject_result = overlay.inject_overlay(ctx, args.firmware_name, ov, force=args.force)
+            results.append(inject_result)
+            if not inject_result.ok:
+                _print_step_results(results)
+                return 1
+
+        # Pack firmware
         pack_results = firmware.pack_firmware(ctx, args.firmware_name, output_name=args.output, force=args.force)
         results.extend(pack_results)
         _print_step_results(results)
