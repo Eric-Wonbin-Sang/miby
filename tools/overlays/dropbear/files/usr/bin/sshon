@@ -1,0 +1,5 @@
+#!/bin/sh
+mkdir -p /mnt/sdcard/miby_logs
+echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) [dropbear] enable requested via sshon" >> /mnt/sdcard/miby_logs/dropbear.log 2>/dev/null || true
+touch /usr/data/dropbear/enable_ssh
+/etc/init.d/S95dropbear start >> /mnt/sdcard/miby_logs/dropbear.log 2>&1 || true

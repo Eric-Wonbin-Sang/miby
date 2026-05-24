@@ -296,6 +296,22 @@ This structure keeps multiple firmware versions independent, and lets the UI cal
 
 ---
 
+## Overlays
+
+Overlays are now modular and discovered from `tools/overlays/<name>/`.
+
+- Place static files in `tools/overlays/<name>/files/` mirroring the target rootfs layout (for example `files/etc/init.d/S95dropbear`).
+- Implement optional overlay build logic in `tools/overlays/<name>/overlay.py` by subclassing the provided `FirmwareOverlay` base class.
+- Use the CLI to list, build, and inject overlays:
+
+```bash
+python3 tools/miby_build.py overlays
+python3 tools/miby_build.py overlay-build --all --public-key /path/to/key.pub
+python3 tools/miby_build.py inject-overlays r3proii.upt dropbear adb debug_predropbear debug_log_flush --force
+```
+
+Generated overlays are written to `overlays/<name>/` and are injected into the extracted rootfs before packaging.
+
 TODO
 
 # Custom Device UI

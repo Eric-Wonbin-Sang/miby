@@ -4,6 +4,7 @@ from pathlib import Path
 from typing import List
 
 from . import adb, context, dropbear, firmware, overlay, status
+from . import overlay_registry as overlays_registry
 from .status import StepResult
 
 
@@ -107,6 +108,19 @@ def main(argv: List[str] = None) -> int:
 
     adb_overlay_parser = subparsers.add_parser("adb-overlay", help="Create adb overlay")
 
+    overlays_list_parser = subparsers.add_parser("overlays", help="List discovered overlay plugins")
+
+    overlay_build_parser = subparsers.add_parser("overlay-build", help="Build overlays from tools/overlays")
+    overlay_build_parser.add_argument("names", nargs="*", help="Overlay names to build")
+    overlay_build_parser.add_argument("--all", action="store_true")
+    overlay_build_parser.add_argument("--public-key", type=str, default=None)
+
+    inject_overlays_parser = subparsers.add_parser("inject-overlays", help="Inject multiple overlays into firmware")
+    inject_overlays_parser.add_argument("firmware_name")
+    inject_overlays_parser.add_argument("names", nargs="*", help="Overlay names to inject")
+    inject_overlays_parser.add_argument("--all", action="store_true")
+    inject_overlays_parser.add_argument("--force", action="store_true")
+
     adb_inject_parser = subparsers.add_parser("adb-inject", help="Create and inject adb overlay")
     adb_inject_parser.add_argument("firmware_name")
     adb_inject_parser.add_argument("--force", action="store_true")
@@ -141,6 +155,13 @@ def main(argv: List[str] = None) -> int:
         status.print_project_status(status_obj)
         return 0
 
+    if args.command == "overlays":
+        names = overlays_registry.discover_overlay_names(ctx)
+        print("Discovered overlays:")
+        for n in names:
+            print(f"  - {n}")
+        return 0
+
     # All other commands perform build operations in the context of the selected
     # firmware source and the configured repository root.
 
@@ -155,13 +176,8 @@ def main(argv: List[str] = None) -> int:
         return 1 if not result.ok else 0
 
     if args.command == "dropbear-overlay":
-        result = dropbear.create_dropbear_overlay(
-            ctx,
-            public_key=args.public_key,
-            auto_start=args.auto_start,
-            show_indicator=args.show_indicator,
-            port=args.port,
-        )
+        # Build the dropbear overlay via overlay registry for compatibility
+        result = overlays_registry.build_overlay(ctx, "dropbear", public_key=args.public_key, auto_start=args.auto_start, show_indicator=args.show_indicator, port=args.port)
         _print_step_results([result])
         return 1 if not result.ok else 0
 
@@ -169,6 +185,36 @@ def main(argv: List[str] = None) -> int:
         result = overlay.inject_overlay(ctx, args.firmware_name, args.overlay, force=args.force)
         _print_step_results([result])
         return 1 if not result.ok else 0
+
+    if args.command == "overlay-build":
+        names = args.names or []
+        if args.all:
+            results = overlays_registry.build_all_overlays(ctx, public_key=args.public_key)
+        else:
+            results = overlays_registry.build_overlays(ctx, names, public_key=args.public_key)
+        _print_step_results(results)
+        return 1 if _any_failure(results) else 0
+
+    if args.command == "inject-overlays":
+        names = args.names or []
+        if args.all:
+            names = overlays_registry.discover_overlay_names(ctx)
+        results = []
+        # Ensure overlays built
+        build_results = overlays_registry.build_overlays(ctx, names)
+        results.extend(build_results)
+        if _any_failure(build_results):
+            _print_step_results(results)
+            return 1
+        # Inject each
+        for n in names:
+            r = overlay.inject_overlay(ctx, args.firmware_name, n, force=args.force)
+            results.append(r)
+            if not r.ok:
+                _print_step_results(results)
+                return 1
+        _print_step_results(results)
+        return 0
 
     if args.command == "inject-dropbear":
         results = dropbear.inject_dropbear(
@@ -184,11 +230,13 @@ def main(argv: List[str] = None) -> int:
         return 1 if _any_failure(results) else 0
 
     if args.command == "adb-overlay":
-        result = adb.create_adb_overlay(ctx)
+        result = overlays_registry.build_overlay(ctx, "adb")
         _print_step_results([result])
         return 1 if not result.ok else 0
 
     if args.command == "adb-inject":
+        # build if necessary
+        overlays_registry.build_overlay(ctx, "adb")
         results = adb.inject_adb(ctx, args.firmware_name, force=args.force)
         _print_step_results(results)
         return 1 if _any_failure(results) else 0
@@ -205,26 +253,19 @@ def main(argv: List[str] = None) -> int:
         if _any_failure(extract_results):
             _print_step_results(results)
             return 1
-
+        # support legacy flags
+        overlays_to_inject = []
         if args.dropbear:
-            inject_results = dropbear.inject_dropbear(
-                ctx,
-                args.firmware_name,
-                public_key=args.public_key,
-                auto_start=True,
-                show_indicator=True,
-                port=2222,
-                force=args.force,
-            )
-            results.extend(inject_results)
-            if _any_failure(inject_results):
-                _print_step_results(results)
-                return 1
-
+            overlays_to_inject.append("dropbear")
         if args.adb:
-            adb_results = adb.inject_adb(ctx, args.firmware_name, force=args.force)
-            results.extend(adb_results)
-            if _any_failure(adb_results):
+            overlays_to_inject.append("adb")
+        # additional overlays via env var or future flags can be added
+        for ov in overlays_to_inject:
+            # build then inject
+            overlays_registry.build_overlay(ctx, ov, public_key=args.public_key)
+            r = overlay.inject_overlay(ctx, args.firmware_name, ov, force=args.force)
+            results.append(r)
+            if not r.ok:
                 _print_step_results(results)
                 return 1
 

@@ -1,0 +1,8 @@
+#!/bin/sh
+mkdir -p /mnt/sdcard/miby_logs
+LOG=/mnt/sdcard/miby_logs/postboot.log
+echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) [flush] postboot" >> $LOG 2>/dev/null || true
+( sleep 5; cp -a /usr/data/miby_logs/*.log /mnt/sdcard/miby_logs/ 2>/dev/null || true ) &
+( sleep 20; cp -a /usr/data/miby_logs/*.log /mnt/sdcard/miby_logs/ 2>/dev/null || true ) &
+( sleep 60; cp -a /usr/data/miby_logs/*.log /mnt/sdcard/miby_logs/ 2>/dev/null || true ) &
+exit 0

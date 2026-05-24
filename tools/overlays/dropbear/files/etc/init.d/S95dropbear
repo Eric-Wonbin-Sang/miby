@@ -1,0 +1,167 @@
+#!/bin/sh
+
+PORT=${PORT:-2222}
+PIDFILE=/usr/data/dropbear/dropbear.pid
+HOST_ED25519=/usr/data/dropbear/dropbear_ed25519_host_key
+HOST_RSA=/usr/data/dropbear/dropbear_rsa_host_key
+SSH_DIR=/usr/data/dropbear/root/.ssh
+AUTH_KEYS_SOURCE=/etc/dropbear/authorized_keys.default
+AUTH_KEYS_DEST=$SSH_DIR/authorized_keys
+ENABLE_MARKER=/usr/data/dropbear/enable_ssh
+DROPBEAR_BIN=/usr/bin/dropbear
+DROPBEARKEY_BIN=/usr/bin/dropbearkey
+LOGFILE=/mnt/sdcard/miby_logs/dropbear.log
+AUTO_START=1
+SHOW_INDICATOR=1
+
+log() {
+  mkdir -p "$(dirname "$LOGFILE")" >/dev/null 2>/dev/null || true
+  echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) [dropbear] $*" >> "$LOGFILE" 2>/dev/null || true
+  echo "[dropbear] $*" > /dev/console 2>/dev/null || true
+}
+
+ensure_dirs() {
+  mkdir -p "$SSH_DIR" >/dev/null 2>/dev/null || true
+  mkdir -p "$(dirname "$PIDFILE")" >/dev/null 2>/dev/null || true
+  mkdir -p "$(dirname "$LOGFILE")" >/dev/null 2>/dev/null || true
+}
+
+ensure_authorized_keys() {
+  mkdir -p "$SSH_DIR" >/dev/null 2>/dev/null || true
+  chmod 0700 "$SSH_DIR" >/dev/null 2>/dev/null || true
+
+  if [ -f "$AUTH_KEYS_SOURCE" ]; then
+    if [ ! -s "$AUTH_KEYS_DEST" ]; then
+      log "copying default authorized_keys to runtime"
+      cp "$AUTH_KEYS_SOURCE" "$AUTH_KEYS_DEST" >/dev/null 2>/dev/null || log "copy authorized_keys failed"
+    else
+      log "runtime authorized_keys already exists and is non-empty"
+    fi
+  else
+    log "missing $AUTH_KEYS_SOURCE"
+  fi
+
+  if [ -f "$AUTH_KEYS_DEST" ]; then
+    chmod 0600 "$AUTH_KEYS_DEST" >/dev/null 2>/dev/null || true
+  fi
+}
+
+ensure_host_keys() {
+  if [ ! -f "$HOST_ED25519" ]; then
+    if "$DROPBEARKEY_BIN" -t ed25519 -f "$HOST_ED25519" >/dev/null 2>/dev/null; then
+      log "generated host ed25519 key"
+    else
+      log "failed to generate host ed25519 key"
+    fi
+  fi
+
+  if [ ! -f "$HOST_RSA" ]; then
+    if "$DROPBEARKEY_BIN" -t rsa -s 2048 -f "$HOST_RSA" >/dev/null 2>/dev/null; then
+      log "generated host rsa key"
+    else
+      log "failed to generate host rsa key"
+    fi
+  fi
+
+  chmod 0600 "$HOST_ED25519" >/dev/null 2>/dev/null || true
+  chmod 0600 "$HOST_RSA" >/dev/null 2>/dev/null || true
+}
+
+ensure_root_ssh() {
+  if [ -L /root/.ssh ]; then
+    return 0
+  fi
+  if [ -d /root/.ssh ]; then
+    return 0
+  fi
+  if ln -sf "$SSH_DIR" /root/.ssh >/dev/null 2>/dev/null; then
+    log "ensured /root/.ssh -> $SSH_DIR"
+  else
+    log "could not create /root/.ssh symlink (may be read-only)"
+  fi
+}
+
+show_dropbear_indicator() {
+  if [ "$SHOW_INDICATOR" != "1" ]; then
+    return 0
+  fi
+  (
+    echo "[dropbear] SSH started on port $PORT" > /dev/console 2>/dev/null || true
+  ) &
+}
+
+is_running() {
+  if [ -f "$PIDFILE" ]; then
+    pid="$(cat "$PIDFILE" 2>/dev/null)"
+    if [ -n "$pid" ] && kill -0 "$pid" >/dev/null 2>/dev/null; then
+      return 0
+    fi
+  fi
+  return 1
+}
+
+start() {
+  if [ "$AUTO_START" != "1" ] && [ ! -f "$ENABLE_MARKER" ]; then
+    log "SSH disabled"
+    return 0
+  fi
+  if is_running; then
+    log "already running"
+    return 0
+  fi
+  ensure_dirs
+  ensure_authorized_keys
+  ensure_host_keys
+  ensure_root_ssh
+  if [ ! -f "$AUTH_KEYS_DEST" ]; then
+    log "no authorized_keys; not starting"
+    ls -la "$SSH_DIR" >> "$LOGFILE" 2>/dev/null || true
+    ls -la "/etc/dropbear" >> "$LOGFILE" 2>/dev/null || true
+    return 1
+  fi
+  if "$DROPBEAR_BIN" \
+    -p "$PORT" \
+    -P "$PIDFILE" \
+    -r "$HOST_ED25519" \
+    -r "$HOST_RSA" \
+    -s \
+    -g \
+    -j \
+    -k >> "$LOGFILE" 2>&1; then
+    :
+  else
+    log "failed to start (see $LOGFILE)"
+    tail -n 200 "$LOGFILE" 2>/dev/null || true
+    return 1
+  fi
+  log "started on port $PORT"
+  show_dropbear_indicator
+}
+
+stop() {
+  if [ -f "$PIDFILE" ]; then
+    pid="$(cat "$PIDFILE" 2>/dev/null)"
+    if [ -n "$pid" ]; then
+      kill "$pid" >/dev/null 2>/dev/null || true
+    fi
+    rm -f "$PIDFILE" >/dev/null 2>/dev/null || true
+  fi
+}
+
+case "$1" in
+  start)
+    start
+    ;;
+  stop)
+    stop
+    ;;
+  restart)
+    stop
+    start
+    ;;
+  *)
+    echo "Usage: $0 {start|stop|restart}" > /dev/console 2>/dev/null || true
+    ;;
+esac
+
+exit 0
