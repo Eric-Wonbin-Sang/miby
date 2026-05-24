@@ -10,7 +10,7 @@ AUTH_KEYS_DEST=$SSH_DIR/authorized_keys
 ENABLE_MARKER=/usr/data/dropbear/enable_ssh
 DROPBEAR_BIN=/usr/bin/dropbear
 DROPBEARKEY_BIN=/usr/bin/dropbearkey
-LOGFILE=/mnt/sdcard/miby_logs/dropbear.log
+LOGFILE=/usr/data/miby_logs/dropbear.log
 AUTO_START=1
 SHOW_INDICATOR=1
 

@@ -28,11 +28,13 @@ def create_adb_overlay(ctx) -> StepResult:
     adb_init_script = etc_init / "S91adb_enable"
     adb_script_content = """#!/bin/sh
 # Enable ADB daemon and log diagnostics
-mkdir -p /mnt/sdcard
-echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) [adb] enable requested" >> /mnt/sdcard/adb.log 2>/dev/null || true
-setprop persist.sys.usb.config adb >/dev/null 2>&1 || echo "setprop failed" >> /mnt/sdcard/adb.log 2>/dev/null || true
-/system/bin/adbd >> /mnt/sdcard/adb.log 2>&1 &
-echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) [adb] started" >> /mnt/sdcard/adb.log 2>/dev/null || true
+mkdir -p /usr/data/miby_logs >/dev/null 2>/dev/null || true
+LOG=/usr/data/miby_logs/adb.log
+
+echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) [adb] enable requested" >> "$LOG" 2>/dev/null || true
+setprop persist.sys.usb.config adb >/dev/null 2>&1 || echo "setprop failed" >> "$LOG" 2>/dev/null || true
+/system/bin/adbd >> "$LOG" 2>&1 &
+echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) [adb] started" >> "$LOG" 2>/dev/null || true
 exit 0
 """
     if not ctx.dry_run:

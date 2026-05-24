@@ -1,8 +1,10 @@
 #!/bin/sh
-# Enable ADB daemon and log diagnostics to SD
-mkdir -p /mnt/sdcard/miby_logs
-echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) [adb] enable requested" >> /mnt/sdcard/miby_logs/adb.log 2>/dev/null || true
-setprop persist.sys.usb.config adb >/dev/null 2>&1 || echo "setprop failed" >> /mnt/sdcard/miby_logs/adb.log 2>/dev/null || true
-/system/bin/adbd >> /mnt/sdcard/miby_logs/adb.log 2>&1 &
-echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) [adb] started" >> /mnt/sdcard/miby_logs/adb.log 2>/dev/null || true
+# Enable ADB daemon and log diagnostics internally, then flush to SD if available
+mkdir -p /usr/data/miby_logs >/dev/null 2>/dev/null || true
+LOG=/usr/data/miby_logs/adb.log
+
+echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) [adb] enable requested" >> "$LOG" 2>/dev/null || true
+setprop persist.sys.usb.config adb >/dev/null 2>&1 || echo "setprop failed" >> "$LOG" 2>/dev/null || true
+/system/bin/adbd >> "$LOG" 2>&1 &
+echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) [adb] started" >> "$LOG" 2>/dev/null || true
 exit 0

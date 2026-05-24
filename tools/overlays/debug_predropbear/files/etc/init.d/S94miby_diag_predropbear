@@ -1,6 +1,6 @@
 #!/bin/sh
-mkdir -p /mnt/sdcard/miby_logs
-LOG=/mnt/sdcard/miby_logs/predropbear.log
+mkdir -p /usr/data/miby_logs >/dev/null 2>/dev/null || true
+LOG=/usr/data/miby_logs/predropbear.log
 echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) [predropbear] diag" >> $LOG 2>/dev/null || true
 uname -a >> $LOG 2>/dev/null || true
 id >> $LOG 2>/dev/null || true

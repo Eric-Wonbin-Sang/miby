@@ -1,8 +1,24 @@
 #!/bin/sh
-mkdir -p /mnt/sdcard/miby_logs
-LOG=/mnt/sdcard/miby_logs/postboot.log
-echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) [flush] postboot" >> $LOG 2>/dev/null || true
-( sleep 5; cp -a /usr/data/miby_logs/*.log /mnt/sdcard/miby_logs/ 2>/dev/null || true ) &
-( sleep 20; cp -a /usr/data/miby_logs/*.log /mnt/sdcard/miby_logs/ 2>/dev/null || true ) &
-( sleep 60; cp -a /usr/data/miby_logs/*.log /mnt/sdcard/miby_logs/ 2>/dev/null || true ) &
+SRC=/usr/data/miby_logs
+SD_CANDIDATES="/data/mnt/sd_0 /usr/data/mnt/sd_0"
+
+mkdir -p "$SRC" >/dev/null 2>/dev/null || true
+LOG=$SRC/postboot.log
+
+echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) [flush] postboot" >> "$LOG" 2>/dev/null || true
+
+copy_logs() {
+  for SD in $SD_CANDIDATES; do
+    if [ -d "$SD" ]; then
+      DST="$SD/miby_logs"
+      mkdir -p "$DST" >/dev/null 2>/dev/null || true
+      cp -a "$SRC"/*.log "$DST/" 2>/dev/null || true
+      echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) [flush] copied logs to $DST" >> "$DST/flush_marker.log" 2>/dev/null || true
+    fi
+  done
+}
+
+( sleep 5; copy_logs ) &
+( sleep 20; copy_logs ) &
+( sleep 60; copy_logs ) &
 exit 0

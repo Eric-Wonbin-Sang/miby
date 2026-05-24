@@ -176,6 +176,9 @@ python3 tools/miby_build.py pack r3proii.upt --output r3proii_miby.upt
 python3 tools/miby_build.py full r3proii.upt --dropbear --output r3proii_dropbear_miby.upt
 python3 tools/miby_build.py full r3proii.upt --adb --output r3proii_adb_miby.upt
 python3 tools/miby_build.py full r3proii.upt --dropbear --adb --output r3proii_full_miby.upt
+
+# for a full run with public key injection
+cd /mnt/c/Users/ericw/local-coding-projects/miby && python3 tools/miby_build.py full r3proii.upt --dropbear --adb --public-key /home/ericw/.ssh/id_ed25519.pub --output r3proii_full_miby.upt --force && ls -la output/r3proii_full_miby.upt && du -h output/r3proii_full_miby.upt
 ```
 
 # Flashing Firmware
