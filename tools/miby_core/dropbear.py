@@ -250,6 +250,15 @@ def create_dropbear_overlay(
         etc_init.mkdir(parents=True, exist_ok=True)
         etc_dropbear.mkdir(parents=True, exist_ok=True)
 
+    # Ensure an overlay entry that makes /root/.ssh a symlink to the
+    # persistent dropbear location. This ensures Dropbear's lookup of
+    # /root/.ssh/authorized_keys resolves to the persistent storage
+    # under /usr/data/dropbear/root/.ssh at runtime.
+    root_dir = overlay_dir / "root"
+    if not ctx.dry_run:
+        root_dir.mkdir(parents=True, exist_ok=True)
+        _safe_symlink(root_dir / ".ssh", Path("/usr/data/dropbear/root/.ssh"))
+
     if not ctx.dry_run:
         shutil.copy2(binary, usr_bin / "dropbearmulti")
         (usr_bin / "dropbearmulti").chmod(0o755)
@@ -282,7 +291,10 @@ def create_dropbear_overlay(
             if key_data:
                 (etc_dropbear / "authorized_keys.default").write_text(key_data + "\n", encoding="utf-8")
                 (etc_dropbear / "authorized_keys.default").chmod(0o644)
-    return StepResult.done("create_dropbear_overlay", f"Created dropbear overlay at {overlay_dir}", paths=[overlay_dir])
+
+    # Return the overlay path plus the important files for verification.
+    overlay_paths = [overlay_dir, etc_dropbear / "authorized_keys.default", root_dir / ".ssh"]
+    return StepResult.done("create_dropbear_overlay", f"Created dropbear overlay at {overlay_dir}", paths=overlay_paths)
 
 
 def inject_dropbear(

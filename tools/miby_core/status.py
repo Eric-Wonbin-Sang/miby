@@ -1,3 +1,4 @@
+import os
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Dict, List
@@ -47,6 +48,7 @@ class ProjectStatus:
     dropbear_binary_exists: bool
     dropbear_overlay_exists: bool
     dropbear_default_pubkey_exists: bool
+    dropbear_root_ssh_symlink_valid: bool
 
 
 def list_project_status(ctx) -> ProjectStatus:
@@ -88,6 +90,7 @@ def list_project_status(ctx) -> ProjectStatus:
     binary = build_dir / "dropbearmulti"
     overlay = ctx.overlays_dir / "dropbear"
     pubkey = overlay / "etc/dropbear/authorized_keys.default"
+    root_ssh = overlay / "root" / ".ssh"
 
     return ProjectStatus(
         source_firmwares=source_firmwares,
@@ -97,7 +100,8 @@ def list_project_status(ctx) -> ProjectStatus:
         dropbear_build_dir_exists=build_dir.exists(),
         dropbear_binary_exists=binary.exists(),
         dropbear_overlay_exists=overlay.exists(),
-        dropbear_default_pubkey_exists=pubkey.exists(),
+        dropbear_default_pubkey_exists=pubkey.exists() and pubkey.stat().st_size > 0 if pubkey.exists() else False,
+        dropbear_root_ssh_symlink_valid=root_ssh.is_symlink() and os.readlink(root_ssh) == "/usr/data/dropbear/root/.ssh",
     )
 
 
@@ -131,3 +135,4 @@ def print_project_status(status: ProjectStatus) -> None:
     print(f"    binary: {status.dropbear_binary_exists}")
     print(f"    overlay: {status.dropbear_overlay_exists}")
     print(f"    authorized_keys.default: {status.dropbear_default_pubkey_exists}")
+    print(f"    baked /root/.ssh symlink: {status.dropbear_root_ssh_symlink_valid}")

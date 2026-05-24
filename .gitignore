@@ -14,3 +14,7 @@ scripts/
 
 # Ignore music directory
 music/
+
+# Ignore Python bytecode and caches generated at runtime
+*.pyc
+__pycache__/
