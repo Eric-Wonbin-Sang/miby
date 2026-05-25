@@ -115,6 +115,90 @@ drwxr-xr-x  2 root root 4096 Aug 30 05:49 adb/
 -rwxr-xr-x  1 root root 1165 Dec 30 19:00 S92adb_postmount*
 -rwxr-xr-x  1 root root  514 Aug 30 05:49 T90adb*
 ```
+## Extracted firmware layout
+The extraction process creates a workspace under `work/r3proii.upt_extracted/ota_v0`.
+
+Key pieces of the extracted firmware are:
+
+- `rootfs.squashfs`: the joined SquashFS image built from the original chunk files.
+- `rootfs.squashfs_extracted`: the unpacked root filesystem tree where overlays are merged.
+- `ota_update.in`: the update manifest with metadata for the device's OTA update process.
+- `etc/init.d/`: the main startup/shutdown script directory; custom overlays inject new `S*` scripts here.
+- `etc/dropbear/`, `root/.ssh`, and other overlay paths added by plugins like `dropbear` and `adb`.
+
+The extracted rootfs is a standard Linux-style filesystem layout with some device-specific paths:
+
+- `bin/`: essential user commands and busybox utilities used during boot and maintenance.
+- `sbin/`: system administration binaries used by init scripts and system startup.
+- `usr/bin/`, `usr/sbin/`, `usr/lib/`: the bulk of user programs, helper utilities, and shared libraries.
+- `etc/`: configuration files, service definitions, network settings, and startup scripts.
+- `lib/`: runtime libraries and firmware blobs required by the system.
+- `root/`: root user home directory and SSH/Dropbear config hooks created by overlays.
+- `mnt/sd_0/` and `mnt/udisk_0/`: mounted storage locations on the device where media and external files appear.
+- `usr/data/`: device-specific writable data storage used by apps and services.
+- `var/`: runtime state, logs, and webserver files like `var/www`.
+
+Overlay injection works by copying overlay package contents into `rootfs.squashfs_extracted`, preserving permissions and symlinks. The rebuild process then re-compresses this tree into a new `rootfs.squashfs`, splits it into numbered chunks, updates `ota_update.in`, and packages the result back into a `.upt` ISO.
+
+This means the files you want to modify should be present in the extracted rootfs tree before packing, and injected overlay scripts must be visible under `etc/init.d/` in `rootfs.squashfs_extracted`.
+
+### Extracted filesystem contents
+The unpacked rootfs is a full Linux-style filesystem tree with a few device-specific areas worth understanding:
+
+- `bin/` and `sbin/`: core BusyBox/userland binaries and low-level system utilities used during boot and service startup.
+- `etc/`: configuration, service startup scripts, network interface hooks, Dropbear config, and runtime environment settings.
+  - `etc/init.d/`: the main boot/shutdown script directory.
+  - `etc/network/`: network interface configuration and if-up/if-down hooks.
+  - `etc/dropbear/`: SSH auth keys and Dropbear configuration added by the overlay.
+- `lib/` and `usr/lib/`: shared libraries and firmware blobs used by services and hardware drivers.
+- `usr/bin/` and `usr/sbin/`: additional user and system binaries beyond the core BusyBox set.
+- `usr/resource/`: UI resources, fonts, layouts, strings, and app assets used by the device firmware.
+- `usr/data/`: writable device data storage, including configuration overlays and persistent state.
+- `root/`: root user home, which may be a symlink into `usr/data/` for persistent SSH files.
+- `mnt/sd_0/` and `mnt/udisk_0/`: mounted storage locations for the device's SD card and USB/USB storage.
+- `var/`: runtime state, logs, and webserver files such as `var/www`.
+
+### The `etc/init.d` script flow
+The device uses a simple init.d-style startup sequence:
+
+- `rcS` is the general startup entrypoint.
+- `rcK` is the shutdown entrypoint.
+- `S*` scripts are run in numeric order during boot.
+- `T*` scripts typically run at a later startup phase or as part of ADB-related service initialization.
+
+In the extracted firmware, the present init scripts include:
+
+- `S10mdev` – early device/driver initialization.
+- `S11jpeg_display_shell` – display subsystem startup.
+- `S11module_driver_default` – default module driver setup.
+- `S20urandom` – random seed/hardware RNG initialization.
+- `S21mount_ubifs` – mounting UBIFS storage.
+- `S30dbus` – D-Bus service startup.
+- `S40network` – network stack bring-up.
+- `S43wifi_bcm_init_config` – Wi-Fi driver/config initialization.
+- `S50sys_server` – system server process.
+- `S80_bt_init` – Bluetooth stack startup.
+- `T90adb` – ADB-related startup actions.
+
+Overlay scripts add additional entries such as:
+
+- `S91adb_enable` – enables ADB at boot.
+- `S94miby_diag_predropbear` / `S99miby_diag_flush` – debug overlay hooks inserted by the debug plugins.
+- `S95dropbear` – starts Dropbear SSH.
+
+There is also an `etc/init.d/adb/` directory containing helper scripts used by the ADB service.
+
+### What can be modified
+If you want to change behavior on the device, these are the most useful places:
+
+- `etc/init.d/` for startup/shutdown hooks and service launch scripts.
+- `etc/network/interfaces` and `etc/network/if-*.d/` for network configuration and interface event handling.
+- `etc/dropbear/authorized_keys.default` for SSH key-based login.
+- `root/.ssh` / `usr/data/dropbear/root/.ssh` for persistent root SSH state.
+- `usr/resource/` for UI assets, layouts, text translations, and device-specific resources.
+- `mnt/sd_0/` and `mnt/udisk_0/` for placing files to be accessed by the device at runtime.
+
+Because the firmware rebuild process preserves the extracted tree, you can experiment by placing or editing files in `rootfs.squashfs_extracted` and then repacking with `pack`. If you want changes to survive a fresh extract/build, create overlays that mirror the desired rootfs paths and inject them through the CLI.
 
 # Modifying Firmware
 
