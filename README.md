@@ -237,13 +237,42 @@ The repository provides a CLI entrypoint at `tools/miby_build.py`.
 - `status`: show current project and Dropbear build status
 - `extract <firmware_name> [--force]`: extract a source `.upt`, join rootfs chunks, and unpack the rootfs
 - `dropbear-build [--force] [--redownload-source]`: download and build Dropbear for `mipsel`
-- `dropbear-overlay [--public-key <path>] [--auto-start|--manual-start] [--show-indicator|--no-show-indicator] [--port <port>]`: create a Dropbear overlay package
-- `inject-overlay <firmware_name> <overlay> [--force]`: apply an overlay into an extracted firmware rootfs
-- `inject-dropbear <firmware_name> [--public-key <path>] [--auto-start|--manual-start] [--show-indicator|--no-show-indicator] [--port <port>] [--force]`: build Dropbear, create the overlay, and inject it
-- `adb-overlay`: create an ADB overlay
-- `adb-inject <firmware_name> [--force]`: create and inject the ADB overlay
+- `dropbear-overlay [--public-key <path>] [--auto-start|--manual-start] [--show-indicator|--no-show-indicator] [--port <port>]`: build the Dropbear overlay package
+- `inject-overlay <firmware_name> <overlay> [--force]`: copy a built overlay into an extracted firmware rootfs
+- `overlay-build [names...] [--all] [--public-key <path>] [--port <port>] [--auto-start|--manual-start] [--show-indicator|--no-show-indicator]`: build one or more overlay packages from `tools/overlays`
+- `overlays`: list discovered plugin overlays under `tools/overlays`
+- `inject-overlays <firmware_name> [names...] [--all] [--force] [--public-key <path>] [--port <port>] [--auto-start|--manual-start] [--show-indicator|--no-show-indicator]`: build and inject multiple overlays into an extracted firmware
+- `adb-overlay`: build the ADB overlay package
+- `adb-inject <firmware_name> [--force]`: build or validate ADB overlay and inject it into extracted firmware
 - `pack <firmware_name> [--output <name>] [--force]`: package modified firmware into a new `.upt`
-- `full <firmware_name> [--dropbear] [--adb] [--public-key <path>] [--output <name>] [--force]`: run extract, optional overlays, and pack
+- `full <firmware_name> [--overlay <name>] [--overlays <name>...] [--all-overlays] [--dropbear] [--adb] [--public-key <path>] [--port <port>] [--auto-start|--manual-start] [--show-indicator|--no-show-indicator] [--force] [--output <name>]`: extract firmware, optionally build/inject overlays, and pack
+
+### Command details
+
+- `overlays`: discovers overlay directories with `overlay.py` under `tools/overlays`.
+- `overlay-build`: builds overlays from `tools/overlays`; `--all` builds every discovered overlay.
+- `inject-overlays`: builds overlays first with shared overlay kwargs, then injects each overlay into the extracted rootfs.
+- `full`: runs `extract`, then uses the overlay selection logic below, then `pack`.
+
+### Overlay selection in `full`
+
+The `full` command supports several overlay selection mechanisms:
+
+- `--overlay <name>`: add a single overlay; may be repeated.
+- `--overlays <name> ...`: add one or more overlays in a single flag.
+- `--all-overlays`: build and inject every discovered overlay.
+- `--dropbear` and `--adb`: legacy flags that still work.
+
+Overlay names are deduplicated in insertion order, so the same overlay specified multiple ways is only injected once.
+
+### Shared overlay options
+
+The following options are passed to overlay builds:
+
+- `--public-key <path>`: used by the `dropbear` overlay to create `authorized_keys.default`
+- `--port <port>`: service port used by overlay build scripts
+- `--auto-start` / `--manual-start`: control whether the overlay starts its service automatically
+- `--show-indicator` / `--no-show-indicator`: control whether the overlay enables its UI indicator
 
 ### Example usage
 
@@ -253,45 +282,21 @@ python3 tools/miby_build.py status
 python3 tools/miby_build.py extract r3proii.upt --force
 python3 tools/miby_build.py dropbear-build --force
 python3 tools/miby_build.py dropbear-overlay --public-key /path/to/key.pub --port 2222
-python3 tools/miby_build.py adb-overlay
-python3 tools/miby_build.py inject-dropbear r3proii.upt --force
-python3 tools/miby_build.py inject-adb r3proii.upt --force
-python3 tools/miby_build.py pack r3proii.upt --output r3proii_miby.upt
-python3 tools/miby_build.py full r3proii.upt --dropbear --output r3proii_dropbear_miby.upt
-python3 tools/miby_build.py full r3proii.upt --adb --output r3proii_adb_miby.upt
-python3 tools/miby_build.py full r3proii.upt --dropbear --adb --output r3proii_full_miby.upt
-
-# for a full run with public key injection
-cd /mnt/c/Users/ericw/local-coding-projects/miby && python3 tools/miby_build.py full r3proii.upt --dropbear --adb --public-key /home/ericw/.ssh/id_ed25519.pub --output r3proii_full_miby.upt --force && ls -la output/r3proii_full_miby.upt && du -h output/r3proii_full_miby.upt
-
-# step by step
-python3 tools/miby_build.py overlays
-
-# build
-python3 tools/miby_build.py overlay-build dropbear --public-key /home/ericw/.ssh/id_ed25519.pub
-# or
-python3 tools/miby_build.py overlay-build --all --public-key /home/ericw/.ssh/id_ed25519.pub
-
-# inject
-python3 tools/miby_build.py extract r3proii.upt --force
-
-python3 tools/miby_build.py inject-overlays r3proii.upt \
-  dropbear adb debug_predropbear debug_log_flush \
-  --public-key /home/ericw/.ssh/id_ed25519.pub \
-  --force
-
-python3 tools/miby_build.py pack r3proii.upt \
-  --force \
-  --output r3proii_full_miby.upt
-
-# ---- full build ----
-
-python3 tools/miby_build.py full r3proii.upt \
-  --overlays dropbear adb debug_predropbear debug_log_flush \
-  --public-key /home/ericw/.ssh/id_ed25519.pub \
-  --force \
-  --output r3proii_full_miby.upt
+python3 tools/miby_build.py overlay-build adb
+python3 tools/miby_build.py overlay-build --all --public-key /path/to/key.pub
+python3 tools/miby_build.py inject-overlay r3proii.upt adb --force
+python3 tools/miby_build.py inject-overlays r3proii.upt adb dropbear --force
+python3 tools/miby_build.py pack r3proii.upt --output r3proii_miby.upt --force
+python3 tools/miby_build.py full r3proii.upt --overlay dropbear --overlay adb --public-key /path/to/key.pub --output r3proii_full_miby.upt --force
+python3 tools/miby_build.py full r3proii.upt --overlays dropbear adb debug_predropbear debug_log_flush --public-key /path/to/key.pub --output r3proii_full_miby.upt --force
+python3 tools/miby_build.py full r3proii.upt --all-overlays --public-key /path/to/key.pub --output r3proii_full_miby.upt --force
 ```
+
+### Notes
+
+- `inject-overlays` builds overlays first, then injects them.
+- `overlay-build` builds overlay packages without injecting them.
+- `inject-overlay` can take either a named overlay or a direct overlay directory path.
 
 # Flashing Firmware
 
