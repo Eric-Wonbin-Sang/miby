@@ -179,6 +179,34 @@ python3 tools/miby_build.py full r3proii.upt --dropbear --adb --output r3proii_f
 
 # for a full run with public key injection
 cd /mnt/c/Users/ericw/local-coding-projects/miby && python3 tools/miby_build.py full r3proii.upt --dropbear --adb --public-key /home/ericw/.ssh/id_ed25519.pub --output r3proii_full_miby.upt --force && ls -la output/r3proii_full_miby.upt && du -h output/r3proii_full_miby.upt
+
+# step by step
+python3 tools/miby_build.py overlays
+
+# build
+python3 tools/miby_build.py overlay-build dropbear --public-key /home/ericw/.ssh/id_ed25519.pub
+# or
+python3 tools/miby_build.py overlay-build --all --public-key /home/ericw/.ssh/id_ed25519.pub
+
+# inject
+python3 tools/miby_build.py extract r3proii.upt --force
+
+python3 tools/miby_build.py inject-overlays r3proii.upt \
+  dropbear adb debug_predropbear debug_log_flush \
+  --public-key /home/ericw/.ssh/id_ed25519.pub \
+  --force
+
+python3 tools/miby_build.py pack r3proii.upt \
+  --force \
+  --output r3proii_full_miby.upt
+
+# ---- full build ----
+
+python3 tools/miby_build.py full r3proii.upt \
+  --overlays dropbear adb debug_predropbear debug_log_flush \
+  --public-key /home/ericw/.ssh/id_ed25519.pub \
+  --force \
+  --output r3proii_full_miby.upt
 ```
 
 # Flashing Firmware
