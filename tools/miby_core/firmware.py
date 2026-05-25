@@ -25,7 +25,7 @@ def extract_upt(ctx: ProjectContext, firmware_name: str, force: bool = False) ->
 
     if fw.extracted_dir.exists():
         if force:
-            remove_path(fw.extracted_dir, runner)
+            remove_path(fw.extracted_dir, runner, sudo=True)
         else:
             return StepResult.skip("extract_upt", "Extraction already exists")
 
@@ -58,7 +58,7 @@ def join_rootfs_chunks(ctx: ProjectContext, firmware_name: str, force: bool = Fa
 
     if fw.rootfs_image_path.exists():
         if force:
-            remove_path(fw.rootfs_image_path, runner)
+            remove_path(fw.rootfs_image_path, runner, sudo=True)
         else:
             return StepResult.skip("join_rootfs_chunks", "Rootfs image already joined")
 
@@ -123,11 +123,11 @@ def pack_firmware(ctx: ProjectContext, firmware_name: str, output_name: str = No
 
     if fw.bundle_dir.exists():
         if force:
-            remove_path(fw.bundle_dir, runner)
+            remove_path(fw.bundle_dir, runner, sudo=True)
         else:
             if any(fw.bundle_dir.iterdir()):
                 return [StepResult.fail("pack_firmware", f"Bundle exists: {fw.bundle_dir}. Use --force to rebuild")]
-            remove_path(fw.bundle_dir, runner)
+            remove_path(fw.bundle_dir, runner, sudo=True)
 
     ensure_dir(fw.bundle_dir)
 
