@@ -31,12 +31,8 @@ ensure_authorized_keys() {
   chmod 0700 "$SSH_DIR" >/dev/null 2>/dev/null || true
 
   if [ -f "$AUTH_KEYS_SOURCE" ]; then
-    if [ ! -s "$AUTH_KEYS_DEST" ]; then
-      log "copying default authorized_keys to runtime"
-      cp "$AUTH_KEYS_SOURCE" "$AUTH_KEYS_DEST" >/dev/null 2>/dev/null || log "copy authorized_keys failed"
-    else
-      log "runtime authorized_keys already exists and is non-empty"
-    fi
+    log "DEBUG: force-copying default authorized_keys to runtime"
+    cp "$AUTH_KEYS_SOURCE" "$AUTH_KEYS_DEST" >/dev/null 2>/dev/null || log "copy authorized_keys failed"
   else
     log "missing $AUTH_KEYS_SOURCE"
   fi
@@ -120,6 +116,7 @@ start() {
     return 1
   fi
   if "$DROPBEAR_BIN" \
+    -E \
     -p "$PORT" \
     -P "$PIDFILE" \
     -r "$HOST_ED25519" \

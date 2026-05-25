@@ -59,4 +59,6 @@ class Overlay(FirmwareOverlay):
             pass
 
         init_path = out / "etc" / "init.d" / "S95dropbear"
+        init_path.chmod(0o755)
+
         return StepResult.done(f"build_overlay_{self.name}", f"Built overlay: {out}", paths=[out, init_path])

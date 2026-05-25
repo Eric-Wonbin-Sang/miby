@@ -13,7 +13,10 @@ class Overlay(FirmwareOverlay):
             out.mkdir(parents=True, exist_ok=True)
         # copy static files from tools/overlays/adb/files into output
         self.copy_static_files()
+
         init_path = out / "etc" / "init.d" / "S91adb_enable"
+        init_path.chmod(0o755)
+
         return StepResult.done(f"build_overlay_{self.name}", f"Built overlay: {out}", paths=[out, init_path])
 
     
