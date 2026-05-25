@@ -1,10 +1,223 @@
 #!/bin/sh
-# Enable ADB daemon and log diagnostics internally, then flush to SD if available
-mkdir -p /usr/data/miby_logs >/dev/null 2>/dev/null || true
-LOG=/usr/data/miby_logs/adb.log
 
-echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) [adb] enable requested" >> "$LOG" 2>/dev/null || true
-setprop persist.sys.usb.config adb >/dev/null 2>&1 || echo "setprop failed" >> "$LOG" 2>/dev/null || true
-/system/bin/adbd >> "$LOG" 2>&1 &
-echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) [adb] started" >> "$LOG" 2>/dev/null || true
+LOG_DIR=/usr/data/miby_logs
+TMP_LOG_DIR=/tmp/miby_logs
+LOG_FILE=$LOG_DIR/adb.log
+TMP_LOG_FILE=$TMP_LOG_DIR/adb.log
+
+mkdir -p "$LOG_DIR" "$TMP_LOG_DIR" >/dev/null 2>/dev/null || true
+
+log() {
+  msg="$(date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null) [adb] $*"
+  echo "$msg" >> "$LOG_FILE" 2>/dev/null || true
+  echo "$msg" >> "$TMP_LOG_FILE" 2>/dev/null || true
+  echo "$msg" > /dev/console 2>/dev/null || true
+}
+
+find_sd_dir() {
+  for d in \
+    /data/mnt/sd_0 \
+    /usr/data/mnt/sd_0 \
+    /mnt/sd_0 \
+    /mnt/sdcard \
+    /mnt/sd0 \
+    /media/sdcard
+  do
+    if [ -d "$d" ] && grep -q " $d " /proc/mounts 2>/dev/null; then
+      echo "$d"
+      return 0
+    fi
+  done
+
+  return 1
+}
+
+flush_log_to_sd() {
+  sd_dir="$(find_sd_dir)"
+  if [ -n "$sd_dir" ]; then
+    dst="$sd_dir/miby_logs"
+    mkdir -p "$dst" >/dev/null 2>/dev/null || true
+    cp "$LOG_FILE" "$dst/adb.log" >/dev/null 2>/dev/null || true
+    cp "$TMP_LOG_FILE" "$dst/adb_tmp.log" >/dev/null 2>/dev/null || true
+    echo "$(date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null) [adb] flushed to $dst" >> "$dst/flush_marker.log" 2>/dev/null || true
+  fi
+}
+
+dump_path() {
+  path="$1"
+  log "path check: $path"
+  ls -la "$path" >> "$LOG_FILE" 2>&1 || true
+  ls -la "$path" >> "$TMP_LOG_FILE" 2>&1 || true
+}
+
+dump_file() {
+  path="$1"
+  log "file dump: $path"
+  if [ -e "$path" ]; then
+    {
+      echo "===== $path ====="
+      ls -la "$path"
+      cat "$path"
+      echo ""
+    } >> "$LOG_FILE" 2>&1 || true
+  else
+    log "missing: $path"
+  fi
+}
+
+run_if_executable() {
+  label="$1"
+  shift
+
+  exe="$1"
+
+  if [ -x "$exe" ]; then
+    log "running $label: $*"
+    "$@" >> "$LOG_FILE" 2>&1 || log "$label failed with rc=$?"
+  else
+    log "not executable or missing: $exe"
+  fi
+}
+
+start_adbd_direct() {
+  if [ -x /usr/bin/adbd ]; then
+    log "starting /usr/bin/adbd"
+    /usr/bin/adbd >> "$LOG_FILE" 2>&1 &
+    return 0
+  fi
+
+  if [ -x /sbin/adbd ]; then
+    log "starting /sbin/adbd"
+    /sbin/adbd >> "$LOG_FILE" 2>&1 &
+    return 0
+  fi
+
+  if [ -x /bin/adbd ]; then
+    log "starting /bin/adbd"
+    /bin/adbd >> "$LOG_FILE" 2>&1 &
+    return 0
+  fi
+
+  log "no adbd binary found at /usr/bin/adbd, /sbin/adbd, or /bin/adbd"
+  return 1
+}
+
+dump_adb_diagnostics() {
+  log "===== adb diagnostics start ====="
+
+  {
+    echo "===== uname ====="
+    uname -a
+
+    echo "===== id ====="
+    id
+
+    echo "===== mounts ====="
+    cat /proc/mounts
+
+    echo "===== processes ====="
+    ps
+
+    echo "===== adb candidates ====="
+    ls -la \
+      /usr/bin/adbon \
+      /sbin/usb_adb_enable.sh \
+      /etc/init.d/T90adb \
+      /etc/init.d/adb \
+      /etc/init.d/adb/S310adb \
+      /etc/init.d/adb/S440adb \
+      /usr/bin/adbd \
+      /sbin/adbd \
+      /bin/adbd \
+      2>&1
+
+    echo "===== init.d root ====="
+    ls -la /etc/init.d 2>&1
+
+    echo "===== init.d adb dir ====="
+    ls -la /etc/init.d/adb 2>&1
+
+    echo "===== usb android gadget ====="
+    ls -la /sys/class/android_usb 2>&1
+    ls -la /sys/class/android_usb/android0 2>&1
+
+    echo "===== usb configfs gadget ====="
+    ls -la /sys/kernel/config 2>&1
+    ls -la /sys/kernel/config/usb_gadget 2>&1
+
+    echo "===== usb devices/classes ====="
+    ls -la /sys/class/udc 2>&1
+    ls -la /sys/bus/platform/devices 2>&1 | grep -i usb 2>&1
+
+    echo "===== kernel cmdline ====="
+    cat /proc/cmdline 2>&1
+
+    echo "===== modules ====="
+    lsmod 2>&1
+  } >> "$LOG_FILE" 2>&1 || true
+
+  # These can be noisy, but are useful while debugging.
+  if [ -d /sys/class/android_usb/android0 ]; then
+    find /sys/class/android_usb/android0 -maxdepth 2 -type f -print -exec cat {} \; >> "$LOG_FILE" 2>&1 || true
+  fi
+
+  if [ -d /sys/kernel/config/usb_gadget ]; then
+    find /sys/kernel/config/usb_gadget -maxdepth 4 -type f -print -exec cat {} \; >> "$LOG_FILE" 2>&1 || true
+  fi
+
+  log "===== adb diagnostics end ====="
+}
+
+enable_adb() {
+  log "ADB enable requested"
+
+  dump_adb_diagnostics
+
+  # Try Hiby-specific helper paths first.
+  run_if_executable "adbon" /usr/bin/adbon
+  run_if_executable "usb_adb_enable" /sbin/usb_adb_enable.sh
+
+  # Try stock init scripts.
+  run_if_executable "T90adb" /etc/init.d/T90adb start
+  run_if_executable "S310adb" /etc/init.d/adb/S310adb start
+  run_if_executable "S440adb" /etc/init.d/adb/S440adb start
+
+  # Try direct daemon start last.
+  start_adbd_direct
+
+  {
+    echo "===== post-enable processes ====="
+    ps | grep -i adb
+
+    echo "===== post-enable netstat ====="
+    netstat -ln 2>&1
+  } >> "$LOG_FILE" 2>&1 || true
+
+  flush_log_to_sd
+
+  (
+    sleep 5
+    flush_log_to_sd
+    sleep 20
+    flush_log_to_sd
+    sleep 60
+    flush_log_to_sd
+  ) &
+}
+
+case "$1" in
+  start|"")
+    enable_adb
+    ;;
+  restart)
+    enable_adb
+    ;;
+  stop)
+    log "stop requested; no adb stop action implemented"
+    ;;
+  *)
+    echo "Usage: $0 {start|stop|restart}" > /dev/console 2>/dev/null || true
+    ;;
+esac
+
 exit 0

@@ -6,6 +6,11 @@ from tools.miby_core.status import StepResult
 class Overlay(FirmwareOverlay):
     name = "adb"
 
+    def init_scripts(self) -> list[Path]:
+        return [
+            self.output_dir() / "etc" / "init.d" / "S91adb_enable",
+        ]
+
     def build(self, **kwargs):
         out = self.output_dir()
         if not self.ctx.dry_run:
@@ -18,5 +23,3 @@ class Overlay(FirmwareOverlay):
         init_path.chmod(0o755)
 
         return StepResult.done(f"build_overlay_{self.name}", f"Built overlay: {out}", paths=[out, init_path])
-
-    

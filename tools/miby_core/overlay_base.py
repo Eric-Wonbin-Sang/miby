@@ -33,6 +33,12 @@ class FirmwareOverlay:
     def output_dir(self) -> Path:
         return self.ctx.overlays_dir / self.name
 
+    def init_scripts(self) -> list[Path]:
+        return []
+
+    def executable_files(self) -> list[Path]:
+        return self.init_scripts()
+
     def clean_output(self) -> None:
         out = self.output_dir()
         if out.exists():
@@ -78,11 +84,44 @@ class FirmwareOverlay:
 
     def build(self, **kwargs) -> StepResult:
         out = self.output_dir()
+
         if not self.ctx.dry_run:
             self.clean_output()
             out.mkdir(parents=True, exist_ok=True)
+
         self.copy_static_files()
-        return StepResult.done(f"build_overlay_{self.name}", f"Built overlay: {out}", paths=[out])
+
+        post_result = self.post_build()
+        if not post_result.ok:
+            return post_result
+
+        return StepResult.done(
+            f"build_overlay_{self.name}",
+            f"Built overlay: {out}",
+            paths=[out, *post_result.paths],
+        )
+
+    def post_build(self) -> StepResult:
+        for path in self.init_scripts():
+            if not path.exists():
+                return StepResult.fail(
+                    f"post_build_{self.name}",
+                    f"Expected init script missing: {path}",
+                )
+
+            if path.stat().st_size == 0:
+                return StepResult.fail(
+                    f"post_build_{self.name}",
+                    f"Expected init script is empty: {path}",
+                )
+
+            path.chmod(0o755)
+
+        return StepResult.done(
+            f"post_build_{self.name}",
+            "Overlay post-build checks passed",
+            paths=self.init_scripts(),
+        )
 
     def validate(self) -> StepResult:
         out = self.output_dir()

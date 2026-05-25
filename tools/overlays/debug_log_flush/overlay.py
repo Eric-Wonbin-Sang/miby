@@ -4,7 +4,13 @@ from tools.miby_core.status import StepResult
 
 
 class Overlay(FirmwareOverlay):
+
     name = "debug_log_flush"
+
+    def init_scripts(self) -> list[Path]:
+        return [
+            self.output_dir() / "etc" / "init.d" / "S99miby_diag_flush",
+        ]
 
     def build(self, **kwargs):
         out = self.output_dir()

@@ -6,6 +6,11 @@ from tools.miby_core.status import StepResult
 class Overlay(FirmwareOverlay):
     name = "debug_predropbear"
 
+    def init_scripts(self) -> list[Path]:
+        return [
+            self.output_dir() / "etc" / "init.d" / "S94miby_diag_predropbear",
+        ]
+
     def build(self, **kwargs):
         out = self.output_dir()
         if not self.ctx.dry_run:

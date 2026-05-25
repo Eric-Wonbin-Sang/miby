@@ -8,6 +8,19 @@ from tools.miby_core.dropbear import _dropbear_binary
 class Overlay(FirmwareOverlay):
     name = "dropbear"
 
+    def init_scripts(self) -> list[Path]:
+        return [
+            self.output_dir() / "etc" / "init.d" / "S95dropbear",
+        ]
+
+    def executable_files(self) -> list[Path]:
+        return [
+            self.output_dir() / "etc" / "init.d" / "S95dropbear",
+            self.output_dir() / "usr" / "bin" / "dropbearmulti",
+            self.output_dir() / "usr" / "bin" / "sshon",
+            self.output_dir() / "usr" / "bin" / "sshoff",
+        ]
+
     def build(self, public_key: str = None, **kwargs):
         out = self.output_dir()
         if not self.ctx.dry_run:
