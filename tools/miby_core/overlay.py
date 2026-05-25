@@ -42,6 +42,19 @@ def inject_overlay(ctx: ProjectContext, firmware_name: str, overlay_name_or_path
 
     try:
         runner.run(["cp", "-a", f"{str(overlay_dir)}/.", str(fw.rootfs_extracted_dir)], sudo=True)
+        # Record injected overlay into extracted workspace for later normalization/pack steps
+        record_file = fw.extracted_dir / ".miby_injected_overlays"
+        try:
+            existing = []
+            if record_file.exists():
+                existing = [l.strip() for l in record_file.read_text().splitlines() if l.strip()]
+            if overlay_dir.name not in existing:
+                existing.append(overlay_dir.name)
+                record_file.parent.mkdir(parents=True, exist_ok=True)
+                record_file.write_text("\n".join(existing) + ("\n" if existing else ""))
+        except Exception as rec_exc:
+            return StepResult.fail("inject_overlay", f"Injected overlay {overlay_dir.name} but failed to update overlay record: {rec_exc}")
+
         return StepResult.done("inject_overlay", f"Injected overlay {overlay_dir.name} into {fw.rootfs_extracted_dir}", paths=[fw.rootfs_extracted_dir])
     except Exception as exc:
         return StepResult.fail("inject_overlay", str(exc))

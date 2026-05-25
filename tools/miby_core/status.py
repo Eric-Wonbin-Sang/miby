@@ -1,7 +1,7 @@
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict, List
+from typing import List
 
 
 @dataclass
@@ -36,6 +36,7 @@ class FirmwareStatus:
     rootfs_extracted: bool
     bundle_exists: bool
     output_candidates: List[Path]
+    injected_overlays: List[str] = field(default_factory=list)
 
 
 @dataclass
@@ -65,6 +66,13 @@ def list_project_status(ctx) -> ProjectStatus:
         ota_dir = extracted_dir / "ota_v0"
         rootfs_image = ota_dir / "rootfs.squashfs"
         rootfs_extracted = ota_dir / "rootfs.squashfs_extracted"
+        injected = []
+        record_file = extracted_dir / ".miby_injected_overlays"
+        if record_file.exists():
+            try:
+                injected = [l.strip() for l in record_file.read_text().splitlines() if l.strip()]
+            except Exception:
+                injected = []
 
         output_candidates = []
         if ctx.output_dir.exists():
@@ -80,6 +88,7 @@ def list_project_status(ctx) -> ProjectStatus:
                 rootfs_extracted=rootfs_extracted.exists(),
                 bundle_exists=bundle_dir.exists(),
                 output_candidates=output_candidates,
+                injected_overlays=injected,
             )
         )
 
@@ -125,6 +134,7 @@ def print_project_status(status: ProjectStatus) -> None:
             print(f"      rootfs extracted: {fw.rootfs_extracted}")
             print(f"      bundle exists: {fw.bundle_exists}")
             print(f"      outputs: {', '.join(str(p.name) for p in fw.output_candidates) or 'none'}")
+            print(f"      injected overlays: {', '.join(fw.injected_overlays) or 'none'}")
     else:
         print("    - none")
 

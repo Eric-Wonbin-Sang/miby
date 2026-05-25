@@ -123,6 +123,17 @@ class FirmwareOverlay:
             paths=self.init_scripts(),
         )
 
+    def normalize_injected_rootfs(self, rootfs_dir: Path, runner) -> StepResult:
+        """
+        Runs after this overlay has been injected into rootfs_squashfs_extracted.
+        Fixes ownership/modes in the actual rootfs tree before packing.
+        Default: no-op.
+        """
+        return StepResult.done(
+            f"normalize_rootfs_{self.name}",
+            "No rootfs normalization needed",
+        )
+
     def validate(self) -> StepResult:
         out = self.output_dir()
         if out.exists():

@@ -75,3 +75,32 @@ class Overlay(FirmwareOverlay):
         init_path.chmod(0o755)
 
         return StepResult.done(f"build_overlay_{self.name}", f"Built overlay: {out}", paths=[out, init_path])
+
+    def normalize_injected_rootfs(self, rootfs_dir: Path, runner) -> StepResult:
+        commands = [
+            ["chown", "root:root", rootfs_dir / "root"],
+            ["chmod", "0755", rootfs_dir / "root"],
+            ["chown", "-h", "root:root", rootfs_dir / "root/.ssh"],
+
+            ["chown", "-R", "root:root", rootfs_dir / "etc/dropbear"],
+            ["chmod", "0755", rootfs_dir / "etc/dropbear"],
+            ["chmod", "0644", rootfs_dir / "etc/dropbear/authorized_keys.default"],
+
+            ["chown", "root:root", rootfs_dir / "etc/init.d/S95dropbear"],
+            ["chmod", "0755", rootfs_dir / "etc/init.d/S95dropbear"],
+
+            ["chown", "root:root", rootfs_dir / "usr/bin/dropbearmulti"],
+            ["chmod", "0755", rootfs_dir / "usr/bin/dropbearmulti"],
+
+            ["chown", "-h", "root:root", rootfs_dir / "usr/bin/dropbear"],
+            ["chown", "-h", "root:root", rootfs_dir / "usr/bin/dropbearkey"],
+            ["chown", "-h", "root:root", rootfs_dir / "usr/bin/dbclient"],
+        ]
+
+        for cmd in commands:
+            runner.run([str(x) for x in cmd], sudo=True)
+
+        return StepResult.done(
+            f"normalize_rootfs_{self.name}",
+            "Normalized Dropbear rootfs permissions",
+        )

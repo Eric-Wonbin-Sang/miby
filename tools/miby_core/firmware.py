@@ -4,6 +4,7 @@ from pathlib import Path
 from typing import List
 
 from .command import CommandRunner, ensure_dir, remove_path, require_dir, require_file
+from . import overlay_registry as overlays_registry
 from .context import FirmwareWorkspace, ProjectContext
 from .rootfs import update_ota_update_file, get_file_md5, mksquashfs_rootfs, remove_old_rootfs_bundle_files, split_rootfs_to_chunks
 from .status import StepResult
@@ -141,6 +142,25 @@ def pack_firmware(ctx: ProjectContext, firmware_name: str, output_name: str = No
     results.append(remove_result)
     if not remove_result.ok:
         return results
+
+    # If overlays were injected earlier, run their normalization hooks now
+    record_file = fw.extracted_dir / ".miby_injected_overlays"
+    if record_file.exists():
+        try:
+            overlay_names = [l.strip() for l in record_file.read_text().splitlines() if l.strip()]
+        except Exception as e:
+            return results + [StepResult.fail("normalize_overlays", f"Failed reading injected overlays record: {e}")]
+
+        for name in overlay_names:
+            try:
+                inst = overlays_registry.create_overlay_instance(ctx, name)
+                norm_res = inst.normalize_injected_rootfs(fw.rootfs_extracted_dir, runner)
+                results.append(norm_res)
+                if not norm_res.ok:
+                    return results
+            except Exception as exc:
+                results.append(StepResult.fail(f"normalize_rootfs_{name}", str(exc)))
+                return results
 
     squashfs_path = ota_bundle_dir / "rootfs.squashfs"
     mksq_result = mksquashfs_rootfs(fw.rootfs_extracted_dir, squashfs_path, runner)
